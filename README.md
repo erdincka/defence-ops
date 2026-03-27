@@ -2,7 +2,7 @@
 
 A microservices-based demo application showcasing modern AI-native tactical intelligence capabilities on **HPE Private Cloud AI (PCAI)**.
 
-## 🚀 Deployment on HPE PCAI
+## 🚀 Deployment on HPE PCAI 
 
 Follow these steps to deploy the application into your HPE PCAI environment.
 

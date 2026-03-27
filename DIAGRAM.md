@@ -3,12 +3,12 @@
 This document provides a high-level overview of the **Defence-Ops** microservices architecture, illustrating the connections between services, external providers, and the user request flow.
 
 ## System Architecture
-
+ 
 ```mermaid
+%%{init: { 'theme': 'base', 'themeVariables': { 'primaryColor': '#0070F8', 'primaryTextColor': '#F7F7F7', 'primaryBorderColor': '#62E5F6', 'lineColor': '#05CC93', 'secondaryColor': '#7764FC', 'tertiaryColor': '#00E0AF', 'nodeBorder': '#B1B9BE', 'mainBkg': '#111212', 'textColor': '#E6E8E9', 'edgeLabelBackground': '#3E4550', 'clusterBkg': '#111212', 'clusterBorder': '#7D8A92' } } }%%
 graph TB
     subgraph "External Resources"
         Kafka["Kafka Cluster<br/>(Tactical Events)"]
-        LLM["Inference Services<br/>(KServe/OpenAI Endpoints)"]
     end
 
     subgraph "HPE PCAI Cluster (defence-ops namespace)"
@@ -23,6 +23,8 @@ graph TB
         end
         
         PVC[("Persistent Volume<br/>(config.json)")]
+
+        LLM["Inference Services<br/>(KServe/OpenAI Endpoints)"]
     end
 
     User((User Browser))

@@ -16,7 +16,7 @@ function loadConfig() {
   return {};
 }
 
-function saveConfig(config: any) {
+function saveConfig(config: Record<string, unknown>) {
   try {
     const dir = path.dirname(CONFIG_PATH);
     if (!fs.existsSync(dir)) {
@@ -46,10 +46,11 @@ export async function POST(request: NextRequest) {
       status: "success",
       message: "Configuration saved successfully"
     });
-  } catch (err: any) {
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
     return NextResponse.json({
       status: "error",
-      message: `Failed to save configuration: ${err.message}`
+      message: `Failed to save configuration: ${errorMessage}`
     }, { status: 500 });
   }
 }

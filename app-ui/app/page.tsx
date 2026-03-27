@@ -1,15 +1,18 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { ShieldAlert, Terminal, MessageSquare, Play, Square, Crosshair, Upload, Activity, Settings2, Eye, Zap, ChevronLeft, ChevronRight, Settings } from "lucide-react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { ShieldAlert, MessageSquare, Play, Square, Crosshair, Upload, Activity, Settings2, Eye, Zap, ChevronLeft, ChevronRight, Settings, BookOpen } from "lucide-react";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api } from "@/lib/api";
 import styles from "./ops-center.module.css";
 import SettingsView from "@/components/SettingsView";
+import DocsModal from "@/components/DocsModal";
 
 // Helper to resolve dynamic service URLs
+// Dynamic service URL helper - kept for reference
+/* 
 const getBaseUrl = (envVar: string | undefined, defaultLocal: string) => {
   if (typeof window !== 'undefined') {
     if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
@@ -18,6 +21,7 @@ const getBaseUrl = (envVar: string | undefined, defaultLocal: string) => {
   }
   return envVar || defaultLocal;
 };
+*/
 
 
 const API_BASE = ""; 
@@ -34,6 +38,7 @@ interface ChatMessage {
 
 export default function OpsCenter() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isDocsOpen, setIsDocsOpen] = useState(false);
   const [videos, setVideos] = useState<VideoSource[]>([]);
   const [selectedVideos, setSelectedVideos] = useState<string[]>(['', '', '', '']);
   const [playingState, setPlayingState] = useState<boolean[]>([false, false, false, false]);
@@ -66,6 +71,30 @@ export default function OpsCenter() {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
+  const fetchVideos = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/v1/video/list`);
+      const data = await res.json();
+      if (data.status === 'success') {
+        const vids = data.data;
+        setVideos(vids);
+        // Default to first few videos if available (only if not already set)
+        setSelectedVideos(prev => {
+           // If we already have selections, don't overwrite them automatically
+           if (prev.some(v => v !== "")) return prev;
+           
+           const newSelected = [...prev];
+           for (let i = 0; i < 4; i++) {
+             if (vids[i]) newSelected[i] = vids[i].filename;
+           }
+           return newSelected;
+        });
+      }
+    } catch (_e) {
+      console.error("Failed to fetch videos.");
+    }
+  }, []);
+
   useEffect(() => {
     fetchVideos();
     
@@ -78,13 +107,13 @@ export default function OpsCenter() {
         } else {
           setIsKafkaConfigured(false);
         }
-      } catch (err) {
-        console.error("Failed to check Kafka config", err);
+      } catch (_err) {
+        console.error("Failed to check Kafka config", _err);
         setIsKafkaConfigured(false);
       }
     }
     checkKafka();
-  }, []);
+  }, [fetchVideos]);
 
   useEffect(() => {
     if (!isKafkaConfigured) return;
@@ -95,7 +124,7 @@ export default function OpsCenter() {
       try {
         const data = JSON.parse(e.data);
         setLogs(prev => [...prev, data].slice(-50)); // Keep last 50
-      } catch(err) {
+      } catch(_err) {
          // might be plain string
       }
     };
@@ -105,25 +134,6 @@ export default function OpsCenter() {
     
     return () => sse.close();
   }, [isKafkaConfigured]);
-
-  const fetchVideos = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/v1/video/list`);
-      const data = await res.json();
-      if (data.status === 'success') {
-        const vids = data.data;
-        setVideos(vids);
-        // Default to first few videos if available
-        const newSelected = [...selectedVideos];
-        for (let i = 0; i < 4; i++) {
-          if (vids[i]) newSelected[i] = vids[i].filename;
-        }
-        setSelectedVideos(newSelected);
-      }
-    } catch (e) {
-      console.error("Failed to fetch videos.");
-    }
-  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -146,7 +156,7 @@ export default function OpsCenter() {
       } else {
         toast.error(`Upload failed: ${data.detail || data.message}`);
       }
-    } catch(err) {
+    } catch(_err) {
       toast.dismiss();
       toast.error("Error uploading file.");
     }
@@ -188,8 +198,8 @@ export default function OpsCenter() {
                  video_b64 = vData.data.video_b64;
                }
              }
-           } catch(e) { 
-             console.error("Failed to capture combined context context", e);
+           } catch(_e) { 
+             console.error("Failed to capture combined context context", _e);
            }
         }
       } else if (targetContext !== "none") {
@@ -199,7 +209,7 @@ export default function OpsCenter() {
           if (frameData.status === 'success') {
             image_b64 = frameData.data.image_b64;
           }
-        } catch(e) {
+        } catch(_e) {
           console.error("Failed to capture single frame context");
         }
       }
@@ -229,7 +239,7 @@ export default function OpsCenter() {
          toast.error(`LLM Error: ${errorMsg}`);
       }
       
-    } catch(err) {
+    } catch(_err) {
       const errorMessage = "Failed to reach LLM service.";
       setChatMessages(p => [...p, {role: 'bot', content: errorMessage}]);
       toast.error(errorMessage);
@@ -273,8 +283,8 @@ export default function OpsCenter() {
             video_b64 = vData.data.video_b64;
           }
         }
-      } catch(e) {
-        console.error("Failed to capture sequence context context");
+      } catch(_e) {
+        console.error("Failed to capture sequence context context", _e);
       }
 
       const payload = {
@@ -301,7 +311,7 @@ export default function OpsCenter() {
         setChatMessages(p => [...p, {role: 'bot', content: `Error: ${errorMsg}`}]);
         toast.error(`Analysis Error: ${errorMsg}`);
       }
-    } catch(err) {
+    } catch(_err) {
       const errorMessage = "Failed to reach LLM service for analysis.";
       setChatMessages(p => [...p, {role: 'bot', content: errorMessage}]);
       toast.error(errorMessage);
@@ -321,7 +331,7 @@ export default function OpsCenter() {
       } else {
         toast.error(data.message || "Failed to generate alerts");
       }
-    } catch (err) {
+    } catch (_err) {
       toast.error("Error communicating with Kafka service");
     }
   };
@@ -390,6 +400,9 @@ export default function OpsCenter() {
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
            <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".mp4,.mov" style={{display: 'none'}} />
+           <button onClick={() => setIsDocsOpen(true)} className={styles.secondaryBtn}>
+              <BookOpen size={16} /> Ops Docs
+           </button>
            <button onClick={() => fileInputRef.current?.click()} className={styles.secondaryBtn}>
               <Upload size={16} /> Mount Stream
            </button>
@@ -561,9 +574,8 @@ export default function OpsCenter() {
                                <ReactMarkdown 
                                  remarkPlugins={[remarkGfm]}
                                  components={{
-                                   // Custom component for the <think> tag
-                                   //@ts-ignore
-                                   think: ({node, ...props}) => <div className={styles.thinkSegment} {...props} />
+                                   // @ts-expect-error - Custom 'think' component is not in standard Markdown types
+                                   think: ({node: _node, ...props}: {node: unknown}) => <div className={styles.thinkSegment} {...props} />
                                  }}
                                >
                                  {m.content}
@@ -615,6 +627,7 @@ export default function OpsCenter() {
       )}
 
       {isSettingsOpen && <SettingsView onClose={() => setIsSettingsOpen(false)} />}
+      {isDocsOpen && <DocsModal onClose={() => setIsDocsOpen(false)} />}
     </div>
   );
 }

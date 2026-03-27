@@ -8,6 +8,7 @@ RUN npm install
 
 # Copy application code
 COPY app-ui/ .
+COPY README.md DIAGRAM.md ./
 
 # Build argument for domain
 ARG DOMAIN

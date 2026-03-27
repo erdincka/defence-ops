@@ -1,10 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Image from "next/image";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { Database, ShieldCheck, Server, Key, AlertCircle, RefreshCw, CheckCircle2, ArrowLeft, MessageSquare, Cpu, X } from "lucide-react";
+import { ShieldCheck, Server, Key, AlertCircle, RefreshCw, CheckCircle2, MessageSquare, Cpu, X } from "lucide-react";
 
 interface SettingsViewProps {
   onClose: () => void;
@@ -23,19 +22,14 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
     kafka_sasl_mechanism: "PLAIN"
   });
   const [isSavingDemoConfig, setIsSavingDemoConfig] = useState(false);
-  const [availableModels, setAvailableModels] = useState<any[]>([]);
-  const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
-  const [showModelModal, setShowModelModal] = useState(false);
   const [llmEndpointError, setLlmEndpointError] = useState(false);
   const [discoveryError, setDiscoveryError] = useState<string | null>(null);
   
   // Endpoint Discovery
-  const [discoveredEndpoints, setDiscoveredEndpoints] = useState<any[]>([]);
+  const [discoveredEndpoints, setDiscoveredEndpoints] = useState<{url: string, name: string, type: string}[]>([]);
   const [isLoadingEndpoints, setIsLoadingEndpoints] = useState(false);
-  const [isVerifying, setIsVerifying] = useState(false);
-  const [verificationSuccess, setVerificationSuccess] = useState<boolean | null>(null);
 
 
   const normalizeLlmEndpoint = (url: string) => {
@@ -56,23 +50,20 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
           setDemoConfig(prev => ({...prev, ...demoData.data}));
         }
 
-        setIsLoadingModels(true);
         try {
           const modelsData = await api.getModels();
           if (modelsData && modelsData.models) {
-            setAvailableModels(modelsData.models);
+            // availableModels state removed as it is not used in the UI
           }
-        } catch (mErr) {
-          console.error("Failed to fetch models", mErr);
-        } finally {
-          setIsLoadingModels(false);
+        } catch (_mErr) {
+          console.error("Failed to fetch models", _mErr);
         }
 
         // Fetch discovered endpoints
         await fetchEndpoints();
 
-      } catch (err) {
-        console.error("Failed to load demo config", err);
+      } catch (_err) {
+        console.error("Failed to load demo config", _err);
       }
     }
     loadConfig();
@@ -85,8 +76,8 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
       if (resp.status === "success" && resp.endpoints) {
         setDiscoveredEndpoints(resp.endpoints);
       }
-    } catch (err) {
-      console.error("Failed to fetch discovered endpoints", err);
+    } catch (_err) {
+      console.error("Failed to fetch discovered endpoints", _err);
     } finally {
       setIsLoadingEndpoints(false);
     }
@@ -120,7 +111,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
           setDemoConfig(prev => ({...prev, llm_model: models[0]}));
           toast.success(`Connected! Automatically selected model: ${models[0]}`);
         } else if (models.length > 1) {
-          setShowModelModal(true);
+          // showModelModal state removed as it is not used in the UI
           toast.success(`Discovered ${models.length} models. Please select one.`);
         } else {
           toast.warning("Successfully reached endpoint, but no models were found.");
@@ -143,7 +134,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
   const handleSaveDemoConfig = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSavingDemoConfig(true);
-    let finalConfig = { ...demoConfig };
+    const finalConfig = { ...demoConfig };
     if (finalConfig.llm_endpoint) {
       finalConfig.llm_endpoint = normalizeLlmEndpoint(finalConfig.llm_endpoint);
     }
@@ -156,7 +147,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
       } else {
         toast.error("Save failed.");
       }
-    } catch (err) {
+    } catch (_err) {
       toast.error("Save error.");
     } finally {
       setIsSavingDemoConfig(false);
