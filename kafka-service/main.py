@@ -88,7 +88,7 @@ async def kafka_stream(request: Request) -> EventSourceResponse:
     config = await get_kafka_config()
     broker = config.get("kafka_broker")
     topic = config.get("kafka_topic")
-    sasl_mechanism = config.get("kafka_sasl_mechanism", "PLAIN")
+
     username = config.get("kafka_username")
     password = config.get("kafka_password")
 
@@ -116,9 +116,8 @@ async def kafka_stream(request: Request) -> EventSourceResponse:
                 "enable_auto_commit": False,
             }
             if username and password:
-                is_secure = "9093" in broker or "443" in broker or "https" in broker
-                consumer_kwargs["security_protocol"] = "SASL_SSL" if is_secure else "SASL_PLAINTEXT"
-                consumer_kwargs["sasl_mechanism"] = sasl_mechanism
+                consumer_kwargs["security_protocol"] = "SASL_SSL"
+                consumer_kwargs["sasl_mechanism"] = "PLAIN"
                 consumer_kwargs["sasl_plain_username"] = username
                 consumer_kwargs["sasl_plain_password"] = password
 
@@ -179,7 +178,6 @@ async def generate_sample_messages() -> Any:
     config = await get_kafka_config()
     broker = config.get("kafka_broker")
     topic = config.get("kafka_topic")
-    sasl_mechanism = config.get("kafka_sasl_mechanism", "PLAIN")
     username = config.get("kafka_username")
     password = config.get("kafka_password")
 
@@ -192,9 +190,8 @@ async def generate_sample_messages() -> Any:
         "bootstrap_servers": broker,
     }
     if username and password:
-        is_secure = "9093" in broker or "443" in broker or "https" in broker
-        producer_kwargs["security_protocol"] = "SASL_SSL" if is_secure else "SASL_PLAINTEXT"
-        producer_kwargs["sasl_mechanism"] = sasl_mechanism
+        producer_kwargs["security_protocol"] = "SASL_SSL"
+        producer_kwargs["sasl_mechanism"] = "PLAIN"
         producer_kwargs["sasl_plain_username"] = username
         producer_kwargs["sasl_plain_password"] = password
 

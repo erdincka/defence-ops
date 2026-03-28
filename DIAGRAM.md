@@ -5,49 +5,65 @@ This document provides a high-level overview of the **Defence-Ops** microservice
 ## System Architecture
  
 ```mermaid
-%%{init: { 'theme': 'base', 'themeVariables': { 'primaryColor': '#0070F8', 'primaryTextColor': '#F7F7F7', 'primaryBorderColor': '#62E5F6', 'lineColor': '#05CC93', 'secondaryColor': '#7764FC', 'tertiaryColor': '#00E0AF', 'nodeBorder': '#B1B9BE', 'mainBkg': '#111212', 'textColor': '#E6E8E9', 'edgeLabelBackground': '#3E4550', 'clusterBkg': '#111212', 'clusterBorder': '#7D8A92' } } }%%
-graph TB
-    subgraph "External Resources"
-        Kafka["Kafka Cluster<br/>(Tactical Events)"]
-    end
+%%{ init: { 'themeVariables': { 'edgeLabelBackground': 'transparent', 'primaryTextColor': '#F7F7F7', 'secondaryTextColor': '#F7F7F7', 'tertiaryTextColor': '#F7F7F7' } } }%%
+flowchart TD
+    %% Styling Classes
+    classDef container fill:#7764fc,color:#fff,stroke:#0b4884,stroke-width:2px;
+    classDef outsider fill:#0070f8,color:#fff,stroke:#0b4884,stroke-width:2px;
+    classDef node fill:none,color:#F7F7F7,stroke:#535C66,stroke-width:2px,stroke-dasharray: 5 5;
+    classDef external fill:#3E4550,color:#fff,stroke:#666,stroke-width:2px;
+    classDef database fill:#6c2b7c,color:#fff,stroke:#0b4884,stroke-width:2px;
 
-    subgraph "HPE PCAI Cluster (defence-ops namespace)"
-        Gateway["Istio Gateway<br/>(ezaf-gateway)"]
-        
-        UI["<b>app-ui</b><br/>Next.js Dashboard & Admin API"]
-        
-        subgraph "Backend Services"
-            LS["<b>llm-service</b><br/>FastAPI: Tactical Chat & Discovery"]
-            KS["<b>kafka-service</b><br/>FastAPI: SSE & Alert Generation"]
-            VS["<b>video-service</b><br/>FastAPI: MJPEG & Frame Extraction"]
+    %% 1. User Context (Top)
+    subgraph user ["User"]
+        spa["<b>Web Browser</b><br/><i>Tactical Control Dashboard</i>"]
+    end
+    class spa outsider;
+
+    %% 2. HPE Private Cloud AI
+    subgraph pcai ["<b>HPE Private Cloud AI</b> / <i>Turnkey AI Platform</i>"]
+        subgraph gateway ["&nbsp; VirtualService &nbsp;"]
+            istio["&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; <b>Gateway</b> &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;<br/><i>Routes traffic to services</i>"]
         end
-        
-        PVC[("Persistent Volume<br/>(config.json)")]
+        class istio container;
+        subgraph ns ["Namespace"]
 
-        LLM["Inference Services<br/>(KServe/OpenAI Endpoints)"]
+            app_ui_svc["<b>app-ui</b><br/><i>Config Provider</i>"]
+            llm_svc["<b>llm-service</b><br/><i>VLM Orchestration</i>"]
+            kafka_svc["<b>kafka-service</b><br/><i>Event Streaming</i>"]
+            video_svc["<b>video-service</b><br/><i>MJPEG Streaming</i>"]
+            class app_ui_svc,llm_svc,kafka_svc,video_svc container;
+            
+        end
+        subgraph inf_cluster ["Inference Services [MLIS]"]
+            mlis["<b>MLIS</b><br/><i>Local VLM / NVIDIA Triton</i>"]
+        end
+        class mlis container;
     end
 
-    User((User Browser))
+    %% 3. External Dependencies (Bottom)
+    subgraph external ["Data Fabric (Tactical/Cloud)"]
+        kafka_cluster["<b>Tactical Kafka</b><br/>[Message Broker]<br/><i>Mission telemetry source</i>"]
+    end
+    class kafka_cluster outsider;
 
-    %% User Interaction
-    User -->|HTTPS| Gateway
-    Gateway --> UI
-    Gateway -->|Forwarded API Calls| LS
-    Gateway -->|Forwarded API Calls| KS
-    Gateway -->|Streamed Video| VS
-
-    %% Service Connections
-    UI <-->|Config R/W| PVC
-    KS -.->|Fetch Config| UI
-    LS -.->|Fetch Config| UI
+    %% --- Layout & Relationships ---
+    spa -- "Secure Access<br/>[HTTPS]" --> istio
+    istio -- "Routes UI/Config" --> app_ui_svc
+    istio -- "Routes /llm" --> llm_svc
+    istio -- "Routes /kafka" --> kafka_svc
+    istio -- "Routes /video" --> video_svc
     
-    %% External Integration
-    KS <-->|Pub/Sub| Kafka
-    LS <-->|V1/Chat/Completions| LLM
+    %% Aligning lower components side-by-side
+    llm_svc -- "VLM Inference" --> mlis
+    video_svc -- "Sync Assets" --> app_ui_svc
+    kafka_svc -- "Pub/Sub<br/>[SASL_SSL]" --> kafka_cluster
     
-    %% Data Flow
-    VS -.->|Source Frames| LS
-    KS -.->|SSE Events| UI
+    %% --- Custom Standout Styling ---
+    style pcai fill:none,stroke:#01a982,stroke-width:4px,color:#01a982
+    style gateway fill:#068667,stroke:#01a982,stroke-width:2px,color:#fff
+    style inf_cluster fill:#068667,stroke:#01a982,stroke-width:2px,color:#fff
+    class user,ns,pods,storage,external node;
 ```
 
 ## Service Responsibilities

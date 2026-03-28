@@ -401,7 +401,7 @@ export default function OpsCenter() {
         <div style={{ display: 'flex', gap: '12px' }}>
            <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".mp4,.mov" style={{display: 'none'}} />
            <button onClick={() => setIsDocsOpen(true)} className={styles.secondaryBtn}>
-              <BookOpen size={16} /> Ops Docs
+              <BookOpen size={16} /> Docs
            </button>
            <button onClick={() => fileInputRef.current?.click()} className={styles.secondaryBtn}>
               <Upload size={16} /> Mount Stream

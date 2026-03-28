@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { ShieldCheck, Server, Key, AlertCircle, RefreshCw, CheckCircle2, MessageSquare, Cpu, X } from "lucide-react";
+import { ShieldCheck, Server, Key, AlertCircle, RefreshCw, CheckCircle2, MessageSquare, Cpu, X, Radio, User, Lock } from "lucide-react";
 
 interface SettingsViewProps {
   onClose: () => void;
@@ -19,7 +19,6 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
     kafka_topic: "",
     kafka_username: "",
     kafka_password: "",
-    kafka_sasl_mechanism: "PLAIN"
   });
   const [isSavingDemoConfig, setIsSavingDemoConfig] = useState(false);
   const [isDiscovering, setIsDiscovering] = useState(false);
@@ -332,6 +331,87 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                     </div>
                   )}
                   <p className="helper-text">You must verify the endpoint to populate available models.</p>
+                </div>
+              </div>
+            </section>
+
+            {/* Data Stream Section */}
+            <section className="settings-section">
+              <div className="section-header">
+                <Radio size={18} />
+                <h3>Data Stream (Kafka)</h3>
+              </div>
+
+              <div className="field-group">
+                <div className="field-label">
+                  <label>Broker Endpoint</label>
+                  <p className="field-hint">The Kafka bootstrap server URL</p>
+                </div>
+                <div className="field-value">
+                  <div className="input-with-icon">
+                    <Server size={14} />
+                    <input 
+                      type="text" 
+                      placeholder="pkc-xxxx.us-east-1.aws.confluent.cloud:9092"
+                      value={demoConfig.kafka_broker}
+                      onChange={e => setDemoConfig(prev => ({...prev, kafka_broker: e.target.value}))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="field-group">
+                <div className="field-label">
+                  <label>Tactical Topic</label>
+                  <p className="field-hint">The topic name for live alerts</p>
+                </div>
+                <div className="field-value">
+                  <div className="input-with-icon">
+                    <Radio size={14} />
+                    <input 
+                      type="text" 
+                      placeholder="tactical-alerts"
+                      value={demoConfig.kafka_topic}
+                      onChange={e => setDemoConfig(prev => ({...prev, kafka_topic: e.target.value}))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="field-group">
+                <div className="field-label">
+                  <label>SASL Username</label>
+                  <p className="field-hint">API Key or Username for authentication</p>
+                </div>
+                <div className="field-value">
+                  <div className="input-with-icon">
+                    <User size={14} />
+                    <input 
+                      type="text" 
+                      placeholder="Username"
+                      value={demoConfig.kafka_username}
+                      onChange={e => setDemoConfig(prev => ({...prev, kafka_username: e.target.value}))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="field-group">
+                <div className="field-label">
+                  <label>SASL Password</label>
+                  <p className="field-hint">API Secret or Password</p>
+                </div>
+                <div className="field-value">
+                  <div className="input-with-icon">
+                    <Lock size={14} />
+                    <input 
+                      type="password" 
+                      placeholder="Password"
+                      value={demoConfig.kafka_password}
+                      onChange={e => setDemoConfig(prev => ({...prev, kafka_password: e.target.value}))}
+                    />
+                  </div>
+                  <p className="helper-text">Connection will always use SASL_SSL / PLAIN mechanism.</p>
                 </div>
               </div>
             </section>

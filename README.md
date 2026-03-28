@@ -4,7 +4,9 @@ A microservices-based demo application showcasing modern AI-native tactical inte
 
 ## 🚀 Deployment on HPE PCAI 
 
-Follow these steps to deploy the application into your HPE PCAI environment.
+Use Import Framework wizard to load the helm chart `defence-op.<version>.tgz` and use `defence-ops.png` image as logo. Provide a namespace (you can skip the release name).
+
+Instead, if you have kubectl and helm installed and configured to your PCAI cluster, you can use the following commands to deploy the application:
 
 ### 📋 Prerequisites
 
@@ -35,6 +37,19 @@ The deployment is managed by a unified Helm chart located in `./helm`.
 Once successfully deployed, the application will be available at:
 `https://defence-ops.<YOUR_DOMAIN_NAME>`
 
+First step is to set up the `system config`. Make sure you select the correct API format, when using MLIS, select `OpenAI compatible` and make sure you are using Vision Language Model, e.g. `nemotron-nano-12b-v2-vl` for best results, or `qwen3-vl:8b`). LLM Endpoint and API Token can be found in the `Model Endpoints` screen on AI Essentials.
+
+### ▶️ Using the Application
+
+- Select a video from dropdown menu for each grid box. Depending on your network speed, videos may take a while to load (but they will be cached for future use) when you click the play icon.
+
+- Shield and Eye icons trigger pre-defined AI requests, while the chat box allows for custom queries. Shield triggers "Threat Detection" and Eye triggers "Object Identification" requests.
+
+- When using chatbox, 
+    - you can change the `Assistant Instructions` to customize the model behaviour, 
+    - select a specific video for `Context` or use `Smart Context` to ask questions on what is actually seen on the screen (multiple videos + kafka messages),
+    - enable 'thinking' mode to let the model think before answering and show its reasoning process.
+
 ## 🛠 Microservices Architecture
 
 - **`app-ui`**: Next.js frontend providing the global tactical dashboard and administration portal.
@@ -43,6 +58,8 @@ Once successfully deployed, the application will be available at:
 - **`kafka-service`**: FastAPI service providing real-time telemetry streaming via SSE and tactical alert generation.
 
 ## 🏗 Operations & Maintenance
+
+If you want to make changes, you can build your own images and replace them in the `helm/values.yaml` file, or using `Configure` option on the Tools & Frameworks page.
 
 ### 🧱 Building and Publishing Images
 
