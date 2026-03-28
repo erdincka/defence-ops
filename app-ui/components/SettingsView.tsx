@@ -352,7 +352,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                     <Server size={14} />
                     <input 
                       type="text" 
-                      placeholder="pkc-xxxx.us-east-1.aws.confluent.cloud:9092"
+                      placeholder="datafabric.cloud.hpe.com:9092"
                       value={demoConfig.kafka_broker}
                       onChange={e => setDemoConfig(prev => ({...prev, kafka_broker: e.target.value}))}
                     />
@@ -411,7 +411,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                       onChange={e => setDemoConfig(prev => ({...prev, kafka_password: e.target.value}))}
                     />
                   </div>
-                  <p className="helper-text">Connection will always use SASL_SSL / PLAIN mechanism.</p>
+                  <p className="helper-text">Connection will always use SASL_PLAINTEXT / PLAIN mechanism.</p>
                 </div>
               </div>
             </section>

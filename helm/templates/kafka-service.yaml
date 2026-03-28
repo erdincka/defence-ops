@@ -26,7 +26,7 @@ spec:
         - name: ENV
           value: {{ .Values.global.env | quote }}
         - name: ADMIN_SERVICE_URL
-          value: "http://admin-service.{{ .Release.Namespace }}.svc.cluster.local:8000"
+          value: "http://app-ui.{{ .Release.Namespace }}.svc.cluster.local:3000"
 
 ---
 apiVersion: v1

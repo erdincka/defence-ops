@@ -35,12 +35,12 @@ ADMIN_URL = os.environ.get("ADMIN_SERVICE_URL", "http://app-ui:3000")
 
 
 async def get_kafka_config() -> Dict[str, Any]:
-    """Fetches Kafka configuration from the admin-service.
+    """Fetches Kafka configuration from the app-ui.
     
     Returns:
         A dictionary containing the Kafka configuration.
     """
-    urls = [ADMIN_URL, "http://admin-service:8000"]
+    urls = [ADMIN_URL, "http://app-ui:3000"]
     last_error = None
 
     for url in urls:
@@ -51,6 +51,7 @@ async def get_kafka_config() -> Dict[str, Any]:
                 if resp.status_code == 200:
                     data = resp.json()
                     if data.get("status") == "success":
+                        logger.info("config_loaded_successfully", url=url)
                         return data.get("data", {})
                     else:
                         logger.warning("config_response_error", url=url, status=data.get("status"))
@@ -116,7 +117,7 @@ async def kafka_stream(request: Request) -> EventSourceResponse:
                 "enable_auto_commit": False,
             }
             if username and password:
-                consumer_kwargs["security_protocol"] = "SASL_SSL"
+                consumer_kwargs["security_protocol"] = "SASL_PLAINTEXT"
                 consumer_kwargs["sasl_mechanism"] = "PLAIN"
                 consumer_kwargs["sasl_plain_username"] = username
                 consumer_kwargs["sasl_plain_password"] = password
@@ -190,7 +191,7 @@ async def generate_sample_messages() -> Any:
         "bootstrap_servers": broker,
     }
     if username and password:
-        producer_kwargs["security_protocol"] = "SASL_SSL"
+        producer_kwargs["security_protocol"] = "SASL_PLAINTEXT"
         producer_kwargs["sasl_mechanism"] = "PLAIN"
         producer_kwargs["sasl_plain_username"] = username
         producer_kwargs["sasl_plain_password"] = password

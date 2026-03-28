@@ -463,9 +463,8 @@
   color: #94a3b8;
   cursor: pointer;
   padding: 4px 8px;
-  border-radius: 4px;
   background: rgba(56, 189, 248, 0.05);
-  border: 1px solid rgba(56, 189, 248, 0.2);
+  border: none;
   width: fit-content;
   user-select: none;
   transition: all 0.2s;
