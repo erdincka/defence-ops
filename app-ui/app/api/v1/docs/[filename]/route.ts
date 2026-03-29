@@ -8,8 +8,8 @@ export async function GET(
 ) {
     const { filename } = await params;
     
-    // Security check: only allow README.md and DIAGRAM.md
-    if (filename !== 'README.md' && filename !== 'DIAGRAM.md') {
+    // Security check: only allow USAGE.md and DIAGRAM.md
+    if (filename !== 'USAGE.md' && filename !== 'DIAGRAM.md') {
         return NextResponse.json({ status: 'error', message: 'Not found' }, { status: 404 });
     }
 

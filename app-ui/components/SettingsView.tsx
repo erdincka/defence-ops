@@ -14,7 +14,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
     llm_endpoint: "",
     llm_api_key: "",
     llm_model: "",
-    llm_provider: "ollama",
+    llm_provider: "openai",
     kafka_broker: "",
     kafka_topic: "",
     kafka_username: "",
@@ -185,12 +185,12 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                 </div>
                 <div className="field-value">
                   <select 
-                    value={demoConfig.llm_provider || "ollama"}
+                    value={demoConfig.llm_provider || "openai"}
                     onChange={e => setDemoConfig(prev => ({...prev, llm_provider: e.target.value}))}
                     className="w-full"
                   >
-                    <option value="ollama">Ollama Compatible (Vision via frames)</option>
                     <option value="openai">OpenAI Compatible (Vision via video_url)</option>
+                    <option value="ollama">Ollama Compatible (Vision via frames)</option>
                   </select>
                 </div>
               </div>

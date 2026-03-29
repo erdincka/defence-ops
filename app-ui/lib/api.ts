@@ -1,16 +1,16 @@
-const getBaseUrl = (envVar: string | undefined, defaultLocal: string) => {
+const getBaseUrl = (defaultLocal: string) => {
   if (typeof window !== 'undefined') {
     // In browser: if not on localhost, use relative paths to support custom domains via Istio/VirtualService
     if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
       return '';
     }
   }
-  // Fallback to env var or local development URL
-  return envVar || defaultLocal;
+  // Fallback to local development URL
+  return defaultLocal;
 };
 
-const ADMIN_URL = getBaseUrl(process.env.NEXT_PUBLIC_ADMIN_SERVICE_URL, 'http://localhost:8002');
-const LLM_URL = getBaseUrl(process.env.NEXT_PUBLIC_LLM_SERVICE_URL, 'http://localhost:8003');
+const ADMIN_URL = getBaseUrl('http://localhost:8002');
+const LLM_URL = getBaseUrl('http://localhost:8003');
 
 async function safeJson(response: Response) {
   const text = await response.text();

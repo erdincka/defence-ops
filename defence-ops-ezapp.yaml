@@ -6,11 +6,11 @@ metadata:
   generation: 1
   labels:
     hpe-ezua/imported-app: "true"
-  name: defence-ops-0.0.1-1774573363791
+  name: defence-ops-0.0.3-1774573363791
 spec:
   backoffLimit: 3
   category: dataEngineering
-  chartVersion: 0.0.1
+  chartVersion: 0.0.3
   description: AI-assisted command and control centre
   install: true
   label: Defence Ops

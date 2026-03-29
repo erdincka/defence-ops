@@ -25,10 +25,6 @@ spec:
         env:
         - name: ENV
           value: {{ .Values.global.env | quote }}
-        - name: NEXT_PUBLIC_AUTH_SERVICE_URL
-          value: ""
-        - name: NEXT_PUBLIC_ADMIN_SERVICE_URL
-          value: ""
         volumeMounts:
         - name: app-data
           mountPath: /app/data
@@ -36,7 +32,6 @@ spec:
       - name: app-data
         persistentVolumeClaim:
           claimName: app-data
-
 
 ---
 apiVersion: v1

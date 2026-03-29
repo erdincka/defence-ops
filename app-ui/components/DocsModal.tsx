@@ -56,7 +56,7 @@ interface DocsModalProps {
 }
 
 export default function DocsModal({ onClose }: DocsModalProps) {
-    const [selectedTab, setSelectedTab] = useState<'README.md' | 'DIAGRAM.md'>('README.md');
+    const [selectedTab, setSelectedTab] = useState<'USAGE.md' | 'DIAGRAM.md'>('USAGE.md');
     const [content, setContent] = useState<string>("");
     const [loading, setLoading] = useState(false);
 
@@ -88,10 +88,10 @@ export default function DocsModal({ onClose }: DocsModalProps) {
                     </div>
                     <div className={styles.tabs}>
                         <button 
-                            className={`${styles.tab} ${selectedTab === 'README.md' ? styles.activeTab : ''}`}
-                            onClick={() => setSelectedTab('README.md')}
+                            className={`${styles.tab} ${selectedTab === 'USAGE.md' ? styles.activeTab : ''}`}
+                            onClick={() => setSelectedTab('USAGE.md')}
                         >
-                            README
+                            USAGE
                         </button>
                         <button 
                             className={`${styles.tab} ${selectedTab === 'DIAGRAM.md' ? styles.activeTab : ''}`}

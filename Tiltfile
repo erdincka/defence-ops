@@ -17,7 +17,7 @@ docker_build(
     dockerfile='app-ui/Dockerfile',
     only=[
         'app-ui',
-        'README.md',
+        'USAGE.md',
         'DIAGRAM.md',
     ],
     build_args={
@@ -28,7 +28,7 @@ docker_build(
         sync('./app-ui/app', '/app/app'),
         sync('./app-ui/lib', '/app/lib'),
         sync('./app-ui/public', '/app/public'),
-        sync('./README.md', '/app/README.md'),
+        sync('./USAGE.md', '/app/USAGE.md'),
         sync('./DIAGRAM.md', '/app/DIAGRAM.md'),
     ]
 )
