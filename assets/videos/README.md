@@ -1,3 +1,5 @@
+# !!! Files in this folder are copyrighted and you’re not permitted to distribute or use them in your own products.
+
 # Video Assets
 
 This directory contains baked-in video sequences for demonstrations.
