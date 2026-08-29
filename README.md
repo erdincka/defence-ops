@@ -147,13 +147,17 @@ docker login
 
 Then set the new tags in `helm/values.yaml`.
 
-## A note on the sample videos
+## Provenance, and a note on the sample videos
 
-The clips in `assets/videos/` are third-party footage included to make the demo
-concrete. They are **not** licensed for redistribution or reuse — see
-[assets/videos/README.md](./assets/videos/README.md). Replace them with your own
-material for any public deployment: `video-service` picks up any `.mp4` or `.mov`
-dropped in that directory.
+This demo was developed as part of my work at HPE, and the sample footage in
+`assets/videos/` is included here under HPE's rights to redistribute it.
+
+That permission does not extend to you. The clips remain third-party copyrighted
+material: you may run them as part of this demo, but **not** reuse them in your
+own products or redistribute them separately — see
+[assets/videos/README.md](./assets/videos/README.md). For your own deployment,
+substitute your own material; `video-service` picks up any `.mp4` or `.mov`
+dropped in that directory, no configuration needed.
 
 ---
 
