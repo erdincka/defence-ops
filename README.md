@@ -1,5 +1,7 @@
 # Defence-Ops — a tactical operations centre with a vision model in the loop
 
+> **Prerequisites** — requires [HPE Private Cloud AI](https://www.hpe.com/us/en/hpe-private-cloud-ai.html).
+
 An operations centre watches more video than anyone can actually watch. **Defence-Ops**
 is a demo of what changes when a vision-language model watches it with you: four live
 feeds in a grid, a telemetry ticker alongside them, and an assistant that answers
@@ -75,16 +77,19 @@ model endpoint you configured. [DIAGRAM.md](./DIAGRAM.md) has the detailed versi
 
 ## What you need
 
-- A Kubernetes cluster, with `kubectl` and `helm` configured against it.
+- **[HPE Private Cloud AI](https://www.hpe.com/us/en/hpe-private-cloud-ai.html)**,
+  which supplies the cluster, the model-serving endpoints and the ingress, with
+  `kubectl` and `helm` configured against it.
 - **A vision-language model** on any OpenAI-compatible endpoint — the model must
   accept images, not just text. `nemotron-nano-12b-v2-vl` and `qwen3-vl:8b` both
   work well. A text-only model will deploy and then fail to describe anything.
 - *Optional:* a Kafka broker for live telemetry. Without one the dashboard runs on
   generated alerts, which is enough to demo it.
 
-This was built against [HPE Private Cloud AI](https://www.hpe.com/us/en/hpe-private-cloud-ai.html),
-which supplies the cluster, the model-serving endpoints and the ingress, but nothing
-here is specific to it — any cluster and any OpenAI-compatible vision endpoint will do.
+Private Cloud AI is what this demo is built and verified against. Nothing in the
+chart is hard-wired to it, so it will also install on a plain Kubernetes cluster
+with your own ingress and an OpenAI-compatible vision endpoint — that path just
+is not the supported one.
 
 ## Deploy it
 
@@ -158,6 +163,12 @@ own products or redistribute them separately — see
 [assets/videos/README.md](./assets/videos/README.md). For your own deployment,
 substitute your own material; `video-service` picks up any `.mp4` or `.mov`
 dropped in that directory, no configuration needed.
+
+## Licence
+
+The code, configuration and documentation here are MIT — see [LICENSE](./LICENSE).
+The sample footage in `assets/videos/` and `demo.mp4` is **excluded** from that
+grant and stays under the terms above.
 
 ---
 
