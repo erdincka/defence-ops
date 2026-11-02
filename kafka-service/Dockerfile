@@ -15,8 +15,8 @@ EXPOSE 8000
 
 # Run dev if ENV=development, otherwise run production
 CMD if [ "$ENV" = "development" ]; then \
-      uvicorn main:app --host 0.0.0.0 --port 8000 --reload; \
+      uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --reload; \
     else \
-      uvicorn main:app --host 0.0.0.0 --port 8000; \
+      uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}; \
     fi
 

@@ -29,15 +29,19 @@ chat box.
 
 ## How it works
 
-Four services, each doing one job. The UI holds the configuration; the others ask it
-for what they need.
+Four services, each doing one job, running as four containers in one pod
+(`deployment/defence-ops`), each on its own port behind one Service: `app-ui` 3000,
+`kafka-service` 8001, `llm-service` 8002, `video-service` 8003. The UI saves the
+configuration to `config.json` on the `app-data` volume, and the other services read
+it from there. API keys and passwords stay on the server: the System Config page
+never receives them back.
 
 ```mermaid
 flowchart TB
     browser["Browser<br/><i>tactical dashboard</i>"]
     gw["Ingress gateway"]
 
-    subgraph ns ["Kubernetes namespace"]
+    subgraph ns ["One pod"]
         ui["<b>app-ui</b><br/>Next.js dashboard<br/><i>+ config store (PVC)</i>"]
         vid["<b>video-service</b><br/>FastAPI<br/><i>MJPEG streams · frame extraction</i>"]
         llm["<b>llm-service</b><br/>FastAPI<br/><i>VLM orchestration · model discovery</i>"]
@@ -98,8 +102,7 @@ kubectl create namespace defence-ops
 
 helm install defence-ops ./helm \
   --namespace defence-ops \
-  --set ezua.virtualService.endpoint=defence-ops.<YOUR_DOMAIN> \
-  --set global.env=production
+  --set ezua.virtualService.endpoint=defence-ops.<YOUR_DOMAIN>
 
 kubectl get pods -n defence-ops -w
 ```
@@ -124,6 +127,9 @@ Open **System Config** in the navigation bar and set:
 | API token | The endpoint's key |
 | Kafka *(optional)* | Broker URI, username, password |
 
+Saved tokens and passwords are not shown again: the fields read "Saved – leave blank
+to keep", and saving with them blank keeps the stored values.
+
 Then pick a feed in any grid cell and press play. First load of each video is slow
 while it is fetched and cached; after that it is instant.
 
@@ -138,19 +144,51 @@ questions that demo well.
 
 ## Development
 
-```bash
-cp .env_example .env        # set DOMAIN and KUBE_CONTEXT
-tilt up                     # live-reload against your cluster
-```
-
-To publish your own images and point the chart at them:
+The Tiltfile targets the lonpcai cluster:
 
 ```bash
-docker login
-./scripts/publish_images.sh 1.0.0
+KUBECONFIG=~/.kube/lon-master.yaml tilt up --context lonpcai
 ```
 
-Then set the new tags in `helm/values.yaml`.
+Tilt builds the four images, pushes them to Harbor (`registry.nxsg.co.uk/dev`) and runs
+the pod in namespace `dev` at `https://defence-ops-dev.demo.lon-pcai.twlon.com`, with
+live reload and without SSO. Stop it with `tilt down --context lonpcai`. The Tiltfile
+refuses to deploy into `defence-ops`: a Tilt run there on 2026-05-29 took over the
+Import Framework release's Services and, after the release's next upgrade, left the app
+with no endpoints from 24 October to 2 November 2026.
+
+To publish images, sign in to Docker Hub as `erdincka` and pass the version. The script
+pushes only that tag; `latest` stays on the 1.0.x multi-pod images.
+
+```bash
+docker login -u erdincka
+./scripts/publish_images.sh 1.1.0
+```
+
+Then set `global.image.tag` in `helm/values.yaml`.
+
+### Releasing on lonpcai
+
+The Import Framework app is EzAppConfig `defence-ops-0.0.1-1774573363791`; its job runs
+`helm upgrade` from the platform chartmuseum with the record's `chartVersion` and
+`values`.
+
+1. Publish the images with the release tag (above).
+2. Package the chart: `helm package helm -d dist`.
+3. Upload it to the chartmuseum (a protected namespace, so the cluster owner does this):
+   ```bash
+   kubectl --context lonpcai create --raw /api/v1/namespaces/ez-chartmuseum-ns/services/chartmuseum:8080/proxy/api/charts -f dist/defence-ops-0.1.0.tgz
+   ```
+4. Point the record at the new version, with values that only set the endpoint:
+   ```bash
+   kubectl --context lonpcai patch ezappconfig defence-ops-0.0.1-1774573363791 --type merge \
+     -p '{"spec":{"chartVersion":"0.1.0","values":"ezua:\n  virtualService:\n    endpoint: \"defence-ops.${DOMAIN_NAME}\"\n    istioGateway: \"istio-system/ezaf-gateway\"\n"}}'
+   ```
+5. Check: the record shows `ready` with health `ok`, and `deployment/defence-ops` in
+   `defence-ops` is 4/4 ready.
+
+**Roll back:** patch `chartVersion` back to the previous version, which stays in the
+chartmuseum.
 
 ## Provenance, and a note on the sample videos
 

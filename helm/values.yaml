@@ -2,36 +2,82 @@ ezua:
   virtualService:
     endpoint: "defence-ops.${DOMAIN_NAME}"
     istioGateway: "istio-system/ezaf-gateway"
-
-namespace: defence-ops
+  # SSO at the ingress through oauth2-proxy. The policy lives in istio-system, so the Tilt dev loop
+  # turns it off.
+  authorizationPolicy:
+    enabled: true
 
 global:
-  imagePullPolicy: Always
-  env: "production" # development, production
+  # development runs Next.js and uvicorn with live reload; production runs the built app.
+  appEnv: production
+  # Extra environment variables for every container, as a list of Kubernetes EnvVar objects.
+  extraEnv: []
+  image:
+    tag: "1.1.0"
+    pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+serviceAccount:
+  create: true
+  name: ""
+
+# Holds config.json, which the settings page writes and the services read. The claim keeps the name
+# app-data so that upgrades from chart 0.0.x keep the saved settings.
+persistence:
+  claimName: app-data
+  size: 100Mi
+
+# All four services share one pod, so each listens on its own port. Resource requests are calculated
+# from peak use measured on lonpcai on 2026-11-02. Under the UI's frame and video-context calls for
+# every video, then three all-video requests at once: kafka-service 68 MiB, llm-service 124 MiB,
+# video-service 449 MiB and about 2 CPU cores. app-ui (built, `next start`) peaked at 257 MiB in the
+# 1.0.1 release. Limits leave headroom above that.
 appUi:
-  image: erdincka/defence-ops-app-ui:latest
-  replicas: 1
-  service:
-    type: ClusterIP
-    port: 3000
-
-videoService:
-  image: erdincka/defence-ops-video-service:latest
-  replicas: 1
-  service:
-    type: ClusterIP
-    port: 8000
-
-llmService:
-  image: erdincka/defence-ops-llm-service:latest
-  replicas: 1
-  service:
-    type: ClusterIP
-    port: 8000
+  image: erdincka/defence-ops-app-ui
+  port: 3000
+  probePath: /
+  resources:
+    requests:
+      cpu: 100m
+      memory: 384Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
 
 kafkaService:
-  image: erdincka/defence-ops-kafka-service:latest
-  replicas: 1
-  service:
-    type: ClusterIP
-    port: 8000
+  image: erdincka/defence-ops-kafka-service
+  port: 8001
+  probePath: /health
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+llmService:
+  image: erdincka/defence-ops-llm-service
+  port: 8002
+  probePath: /health
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+videoService:
+  image: erdincka/defence-ops-video-service
+  port: 8003
+  probePath: /health
+  # The upload endpoint holds the whole file in memory, hence the higher limit.
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "4"
+      memory: 4Gi

@@ -2,9 +2,9 @@ FROM --platform=linux/amd64 node:24-slim
 
 WORKDIR /app
 
-# Install dependencies
+# Install dependencies exactly as locked
 COPY app-ui/package*.json ./
-RUN npm install
+RUN npm ci
 
 # Copy application code
 COPY app-ui/ .
@@ -14,12 +14,11 @@ COPY USAGE.md DIAGRAM.md ./
 ARG DOMAIN
 ENV DOMAIN=${DOMAIN}
 
-# Environment variables for stability and Next.js
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV NODE_OPTIONS="--max-old-space-size=4096"
 
-# Build the application for production
-RUN npm run build
+# Build the application for production. The larger heap is for the build only: at run time it
+# would let Node grow past the container's memory limit.
+RUN NODE_OPTIONS="--max-old-space-size=4096" npm run build
 
 EXPOSE 3000
 

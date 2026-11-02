@@ -20,6 +20,8 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
     kafka_username: "",
     kafka_password: "",
   });
+  // Secrets stored on the server; their values are never sent back, so the inputs start blank.
+  const [storedSecrets, setStoredSecrets] = useState<string[]>([]);
   const [isSavingDemoConfig, setIsSavingDemoConfig] = useState(false);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
@@ -47,6 +49,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
         const demoData = await api.getDemoConfig();
         if (demoData?.status === 'success' && demoData.data) {
           setDemoConfig(prev => ({...prev, ...demoData.data}));
+          setStoredSecrets(demoData.meta?.stored_secrets ?? []);
         }
 
         try {
@@ -144,10 +147,10 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
         toast.success("Configuration saved!");
         onClose();
       } else {
-        toast.error("Save failed.");
+        toast.error(data.message || "Settings not saved.");
       }
-    } catch (_err) {
-      toast.error("Save error.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Settings not saved.");
     } finally {
       setIsSavingDemoConfig(false);
     }
@@ -259,9 +262,9 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                 <div className="field-value">
                   <div className="input-with-icon">
                     <Key size={14} />
-                    <input 
-                      type="password" 
-                      placeholder="sk-..."
+                    <input
+                      type="password"
+                      placeholder={storedSecrets.includes("llm_api_key") ? "Saved – leave blank to keep" : "sk-..."}
                       value={demoConfig.llm_api_key}
                       onChange={e => setDemoConfig(prev => ({...prev, llm_api_key: e.target.value}))}
                     />
@@ -404,9 +407,9 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                 <div className="field-value">
                   <div className="input-with-icon">
                     <Lock size={14} />
-                    <input 
-                      type="password" 
-                      placeholder="Password"
+                    <input
+                      type="password"
+                      placeholder={storedSecrets.includes("kafka_password") ? "Saved – leave blank to keep" : "Password"}
                       value={demoConfig.kafka_password}
                       onChange={e => setDemoConfig(prev => ({...prev, kafka_password: e.target.value}))}
                     />

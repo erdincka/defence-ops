@@ -7,7 +7,6 @@ import random
 import time
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-import httpx
 import structlog
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from fastapi import FastAPI, Request
@@ -15,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
+from common.demo_config import load_demo_config
 from common.logging_config import setup_logging
 
 # Configure structured logging
@@ -31,38 +31,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-ADMIN_URL = os.environ.get("ADMIN_SERVICE_URL", "http://app-ui:3000")
-
-
 async def get_kafka_config() -> Dict[str, Any]:
-    """Fetches Kafka configuration from the app-ui.
-    
+    """Reads the Kafka settings saved by the app-ui.
+
     Returns:
         A dictionary containing the Kafka configuration.
     """
-    urls = [ADMIN_URL, "http://app-ui:3000"]
-    last_error = None
-
-    for url in urls:
-        try:
-            logger.debug("fetching_config", url=url)
-            async with httpx.AsyncClient(verify=False) as client:
-                resp = await client.get(f"{url}/api/v1/admin/demo-config", timeout=2.0)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("status") == "success":
-                        logger.info("config_loaded_successfully", url=url)
-                        return data.get("data", {})
-                    else:
-                        logger.warning("config_response_error", url=url, status=data.get("status"))
-                else:
-                    logger.warning("config_http_error", url=url, status_code=resp.status_code)
-        except Exception as e:
-            last_error = str(e)
-            logger.debug("config_fetch_failed", url=url, error=str(e))
-
-    logger.error("all_config_fetches_failed", last_error=last_error)
-    return {}
+    return await load_demo_config()
 
 
 @app.get("/health")
