@@ -50,3 +50,56 @@ Selector labels
 app.kubernetes.io/name: {{ include "defence-ops.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
+
+{{/*
+ServiceAccount name
+*/}}
+{{- define "defence-ops.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "defence-ops.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}
+
+{{/*
+Environment shared by every container. Call with (dict "root" $ "service" .Values.<service>).
+*/}}
+{{- define "defence-ops.env" -}}
+- name: ENV
+  value: {{ .root.Values.global.appEnv | quote }}
+- name: PORT
+  value: {{ .service.port | quote }}
+- name: CONFIG_PATH
+  value: /app/data/config.json
+{{- with .root.Values.global.extraEnv }}
+{{ toYaml . }}
+{{- end }}
+{{- end }}
+
+{{/*
+Probes for one container. Call with the service's values; the startup probe gives Next.js and
+uvicorn up to two minutes to come up, which dev mode needs for its first compile.
+*/}}
+{{- define "defence-ops.probes" -}}
+startupProbe:
+  httpGet:
+    path: {{ .probePath }}
+    port: {{ .port }}
+  periodSeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 24
+readinessProbe:
+  httpGet:
+    path: {{ .probePath }}
+    port: {{ .port }}
+  periodSeconds: 10
+  timeoutSeconds: 5
+livenessProbe:
+  httpGet:
+    path: {{ .probePath }}
+    port: {{ .port }}
+  periodSeconds: 20
+  timeoutSeconds: 5
+  failureThreshold: 3
+{{- end }}

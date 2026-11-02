@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "defence-ops.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "defence-ops.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  # app-data is ReadWriteOnce and holds config.json: replace the pod rather than run two at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "defence-ops.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "defence-ops.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "defence-ops.serviceAccountName" . }}
+      containers:
+        - name: app-ui
+          image: "{{ .Values.appUi.image }}:{{ .Values.global.image.tag }}"
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          ports:
+            - name: ui
+              containerPort: {{ .Values.appUi.port }}
+          env:
+            {{- include "defence-ops.env" (dict "root" . "service" .Values.appUi) | nindent 12 }}
+          {{- include "defence-ops.probes" .Values.appUi | nindent 10 }}
+          resources:
+            {{- toYaml .Values.appUi.resources | nindent 12 }}
+          volumeMounts:
+            - name: app-data
+              mountPath: /app/data
+        - name: kafka-service
+          image: "{{ .Values.kafkaService.image }}:{{ .Values.global.image.tag }}"
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          ports:
+            - name: kafka
+              containerPort: {{ .Values.kafkaService.port }}
+          env:
+            {{- include "defence-ops.env" (dict "root" . "service" .Values.kafkaService) | nindent 12 }}
+          {{- include "defence-ops.probes" .Values.kafkaService | nindent 10 }}
+          resources:
+            {{- toYaml .Values.kafkaService.resources | nindent 12 }}
+          volumeMounts:
+            - name: app-data
+              mountPath: /app/data
+              readOnly: true
+        - name: llm-service
+          image: "{{ .Values.llmService.image }}:{{ .Values.global.image.tag }}"
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          ports:
+            - name: llm
+              containerPort: {{ .Values.llmService.port }}
+          env:
+            {{- include "defence-ops.env" (dict "root" . "service" .Values.llmService) | nindent 12 }}
+          {{- include "defence-ops.probes" .Values.llmService | nindent 10 }}
+          resources:
+            {{- toYaml .Values.llmService.resources | nindent 12 }}
+          volumeMounts:
+            - name: app-data
+              mountPath: /app/data
+              readOnly: true
+        - name: video-service
+          image: "{{ .Values.videoService.image }}:{{ .Values.global.image.tag }}"
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          ports:
+            - name: video
+              containerPort: {{ .Values.videoService.port }}
+          env:
+            {{- include "defence-ops.env" (dict "root" . "service" .Values.videoService) | nindent 12 }}
+          {{- include "defence-ops.probes" .Values.videoService | nindent 10 }}
+          resources:
+            {{- toYaml .Values.videoService.resources | nindent 12 }}
+      volumes:
+        - name: app-data
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.claimName }}

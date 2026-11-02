@@ -1,0 +1,13 @@
+.git
+.gitignore
+.dockerignore
+.tiltignore
+helm/
+dist/
+*.tgz
+defence-ops-ezapp.yaml
+*.mp4
+**/node_modules/
+**/.next/
+**/__pycache__/
+**/.venv/

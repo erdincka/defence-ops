@@ -1,6 +1,5 @@
 """LLM Service for handling chat and model discovery."""
 
-import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -13,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from common.config import get_settings
+from common.demo_config import load_demo_config
 from common.logging_config import setup_logging
 from common.schemas import APIResponse, InferenceServiceInfo, ModelListResponse
 from model_registry import ModelRegistry
@@ -86,51 +86,13 @@ class ChatRequest(BaseModel):
     enable_thinking: Optional[bool] = False
 
 
-ADMIN_URL = os.environ.get("ADMIN_SERVICE_URL", "http://app-ui:3000")
-CONFIG_PATH = os.environ.get("CONFIG_PATH", "/app/data/config.json")
-
-
 async def get_llm_config() -> Dict[str, Any]:
-    """Fetches LLM configuration from the local file or admin-service.
-    
+    """Reads the LLM settings saved by the app-ui.
+
     Returns:
         A dictionary containing the LLM configuration.
     """
-    # 1. Try local file (PVC)
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, "r") as f:
-                config = json.load(f)
-                if "demo_services" in config:
-                    logger.info("config_loaded_from_file", path=CONFIG_PATH)
-                    return config["demo_services"]
-        except Exception as e:
-            logger.warning("config_file_read_failed", path=CONFIG_PATH, error=str(e))
-
-    # 2. Try HTTP fetch
-    urls = [ADMIN_URL, "http://admin-service:8000", "http://app-ui:3000"]
-    last_error = None
-
-    for url in urls:
-        try:
-            logger.debug("fetching_config", url=url)
-            async with httpx.AsyncClient(verify=False) as client:
-                resp = await client.get(f"{url}/api/v1/admin/demo-config", timeout=2.0)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("status") == "success":
-                        logger.info("config_loaded_from_http", url=url)
-                        return data.get("data", {})
-                    else:
-                        logger.warning("config_response_error", url=url, status=data.get("status"))
-                else:
-                    logger.warning("config_http_error", url=url, status_code=resp.status_code)
-        except Exception as e:
-            last_error = str(e)
-            logger.debug("config_fetch_failed", url=url, error=str(e))
-
-    logger.error("all_config_fetches_failed", last_error=last_error)
-    return {}
+    return await load_demo_config()
 
 
 @app.get("/health")
@@ -195,6 +157,13 @@ async def discover_external_models(
     # Canonical check: ENDPOINT + /v1/models
     models_url = f"{endpoint.rstrip('/')}/v1/models"
     logger.info("discovering_models", url=models_url)
+
+    # The UI never holds the stored key, so a blank key means "use the saved one" - but only for
+    # the saved endpoint, so that a typed-in URL cannot be used to send the key elsewhere.
+    if not api_key:
+        config = await get_llm_config()
+        if (config.get("llm_endpoint") or "").rstrip("/") == endpoint.rstrip("/"):
+            api_key = config.get("llm_api_key")
 
     headers = {}
     if api_key:

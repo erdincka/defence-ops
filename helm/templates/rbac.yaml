@@ -1,0 +1,27 @@
+{{- /* llm-service lists KServe InferenceServices in every namespace to offer them as endpoints. */}}
+{{- $name := printf "%s-%s-kserve-reader" (include "defence-ops.fullname" .) .Release.Namespace }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "defence-ops.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["serving.kserve.io"]
+    resources: ["inferenceservices"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "defence-ops.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "defence-ops.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ $name }}
+  apiGroup: rbac.authorization.k8s.io
