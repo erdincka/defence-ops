@@ -24,6 +24,9 @@ spec:
       serviceAccountName: {{ include "defence-ops.serviceAccountName" . }}
       # Nothing in the pod calls the Kubernetes API.
       automountServiceAccountToken: false
+      # No variables for every other Service in the namespace: the containers reach each other on
+      # localhost, and nothing reads them.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -44,6 +47,7 @@ spec:
             {{- include "defence-ops.env" (dict "root" . "service" .Values.appUi) | nindent 12 }}
             - name: SETTINGS_AUTH
               value: {{ .Values.settings.auth | quote }}
+            {{- if eq .Values.settings.auth "oidc" }}
             - name: ADMIN_ROLE
               value: {{ .Values.settings.adminRole | quote }}
             - name: OIDC_ISSUER
@@ -52,6 +56,7 @@ spec:
               value: {{ .Values.ezua.oidc.client_id | default "ua" | quote }}
             - name: OIDC_JWKS_URL
               value: {{ .Values.settings.oidcJwksUrl | quote }}
+            {{- end }}
             - name: NPM_CONFIG_CACHE
               value: /tmp/.npm
             - name: NPM_CONFIG_UPDATE_NOTIFIER
@@ -122,6 +127,16 @@ spec:
               value: "http://127.0.0.1:{{ .Values.videoService.port }}"
             - name: MAX_IMAGES
               value: {{ .Values.llm.maxImages | quote }}
+            {{- range $flag, $env := dict "vision" "LLM_SUPPORTS_VISION" "video" "LLM_SUPPORTS_VIDEO" "reasoning" "LLM_SUPPORTS_REASONING" }}
+            {{- $raw := index $.Values.llm.capabilities $flag }}
+            {{- $value := ternary "" (toString $raw) (kindIs "invalid" $raw) }}
+            {{- if has $value (list "true" "false") }}
+            - name: {{ $env }}
+              value: {{ $value | quote }}
+            {{- else if ne $value "" }}
+            {{- fail (printf "llm.capabilities.%s must be true, false or empty, not %s" $flag $value) }}
+            {{- end }}
+            {{- end }}
           {{- include "defence-ops.probes" .Values.llmService | nindent 10 }}
           {{- include "defence-ops.containerSecurityContext" . | nindent 10 }}
           resources:

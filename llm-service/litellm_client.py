@@ -1,4 +1,9 @@
-"""Client for the in-cluster LiteLLM proxy: the app key's models, their capabilities, and chat."""
+"""Client for the model endpoint: the app key's models, their capabilities, and chat.
+
+The endpoint is a LiteLLM proxy or any OpenAI-compatible server, such as an HPE MLIS deployment.
+Only LiteLLM declares what each model accepts (/v1/model/info); for the others the chart's
+llm.capabilities values say it.
+"""
 
 import time
 from dataclasses import dataclass, replace
@@ -11,14 +16,14 @@ logger = structlog.get_logger(__name__)
 
 
 class LiteLLMNotConfiguredError(Exception):
-    """The app has no LiteLLM key."""
+    """The app has no key for the model endpoint."""
 
 
 class LiteLLMError(Exception):
-    """LiteLLM answered with an error, or could not be reached.
+    """The model endpoint answered with an error, or could not be reached.
 
     Attributes:
-        status_code: LiteLLM's HTTP status; 502 when it could not be reached, 504 on timeout.
+        status_code: The endpoint's HTTP status; 502 when it could not be reached, 504 on timeout.
     """
 
     def __init__(self, message: str, status_code: int) -> None:
@@ -27,17 +32,29 @@ class LiteLLMError(Exception):
 
 
 @dataclass(frozen=True)
-class ModelCapabilities:
-    """What a model accepts, as LiteLLM's model_info declares it.
+class AssumedCapabilities:
+    """What to assume where the endpoint declares nothing (chart values llm.capabilities).
 
-    None means LiteLLM does not say. The chat flow then assumes images work, video does not,
-    and thinking is unavailable.
+    None leaves the capability unknown.
+    """
+
+    vision: bool | None = None
+    video: bool | None = None
+    reasoning: bool | None = None
+
+
+@dataclass(frozen=True)
+class ModelCapabilities:
+    """What a model accepts: LiteLLM's model_info where it declares it, else AssumedCapabilities.
+
+    None means neither says. The chat flow then assumes images work, video does not, and
+    thinking is unavailable.
 
     Attributes:
         id: Model name as the app's key sees it.
-        vision: model_info.supports_vision.
-        video: model_info.supports_video_input, or False once the model has refused a clip.
-        reasoning: model_info.supports_reasoning.
+        vision: supports_vision.
+        video: supports_video_input, or False once the model has refused a clip.
+        reasoning: supports_reasoning.
     """
 
     id: str
@@ -46,9 +63,9 @@ class ModelCapabilities:
     reasoning: bool | None
 
 
-def _flag(info: dict[str, Any], key: str) -> bool | None:
+def _flag(info: dict[str, Any], key: str, assumed: bool | None) -> bool | None:
     value = info.get(key)
-    return value if isinstance(value, bool) else None
+    return value if isinstance(value, bool) else assumed
 
 
 def _error_text(response: httpx.Response) -> str:
@@ -62,7 +79,7 @@ def _error_text(response: httpx.Response) -> str:
 
 
 class LiteLLMClient:
-    """Talks to LiteLLM with the app's own virtual key, which never leaves this service."""
+    """Talks to the model endpoint with the app's own key, which never leaves this service."""
 
     def __init__(
         self,
@@ -71,19 +88,22 @@ class LiteLLMClient:
         timeout: float,
         cache_seconds: float,
         transport: httpx.AsyncBaseTransport | None = None,
+        assumed: AssumedCapabilities | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._timeout = timeout
         self._cache_seconds = cache_seconds
         self._transport = transport  # tests pass httpx.MockTransport
+        self._assumed = assumed or AssumedCapabilities()
         self._cached: tuple[float, list[ModelCapabilities]] | None = None
         self._video_refused: set[str] = set()
 
     def _headers(self) -> dict[str, str]:
         if not self._api_key:
             raise LiteLLMNotConfiguredError(
-                "No LiteLLM key: set llm.apiKey, or llm.existingSecret, in the app's Helm values."
+                "No key for the model endpoint: set llm.apiKey, or llm.existingSecret, in the "
+                "app's Helm values."
             )
         return {"Authorization": f"Bearer {self._api_key}"}
 
@@ -97,8 +117,9 @@ class LiteLLMClient:
     async def list_models(self, refresh: bool = False) -> list[ModelCapabilities]:
         """Lists the models the app's key may use, with their declared capabilities.
 
-        /v1/models is the authority on which models the key may use; /v1/model/info adds the
-        capability flags where LiteLLM has them. Cached for models_cache_seconds.
+        /v1/models is the authority on which models the key may use; LiteLLM's /v1/model/info
+        adds the capability flags it has, and the assumed capabilities fill the rest. Cached for
+        models_cache_seconds.
 
         Args:
             refresh: Ignore the cache.
@@ -108,7 +129,7 @@ class LiteLLMClient:
 
         Raises:
             LiteLLMNotConfiguredError: The app has no key.
-            LiteLLMError: LiteLLM refused the key or could not be reached.
+            LiteLLMError: The endpoint refused the key or could not be reached.
         """
         now = time.monotonic()
         if not refresh and self._cached and now - self._cached[0] < self._cache_seconds:
@@ -120,10 +141,13 @@ class LiteLLMClient:
                 try:
                     info = await self._get(client, "/v1/model/info")
                 except LiteLLMError as e:
-                    logger.warning("litellm_model_info_unavailable", status_code=e.status_code)
+                    # Expected from anything but LiteLLM: llm.capabilities stands in.
+                    logger.info("model_info_unavailable", status_code=e.status_code)
                     info = {}
         except httpx.HTTPError as e:
-            raise LiteLLMError(f"Could not reach LiteLLM at {self._base_url}: {e}", 502) from e
+            raise LiteLLMError(
+                f"Could not reach the model endpoint at {self._base_url}: {e}", 502
+            ) from e
 
         model_info: dict[str, dict[str, Any]] = {}
         for entry in info.get("data", []):
@@ -139,14 +163,17 @@ class LiteLLMClient:
                 if isinstance(m, dict) and isinstance(m.get("id"), str)
             }
         )
+        assumed = self._assumed
         models = [
             ModelCapabilities(
                 id=model_id,
-                vision=_flag(model_info.get(model_id, {}), "supports_vision"),
+                vision=_flag(model_info.get(model_id, {}), "supports_vision", assumed.vision),
                 video=False
                 if model_id in self._video_refused
-                else _flag(model_info.get(model_id, {}), "supports_video_input"),
-                reasoning=_flag(model_info.get(model_id, {}), "supports_reasoning"),
+                else _flag(model_info.get(model_id, {}), "supports_video_input", assumed.video),
+                reasoning=_flag(
+                    model_info.get(model_id, {}), "supports_reasoning", assumed.reasoning
+                ),
             )
             for model_id in ids
         ]
@@ -163,7 +190,7 @@ class LiteLLMClient:
             if candidate.id == model:
                 return candidate
         raise LiteLLMError(
-            f"Model {model} is not available to this app's LiteLLM key. "
+            f"Model {model} is not available to this app's key on the model endpoint. "
             "An administrator should pick another model on System Config.",
             404,
         )
@@ -178,11 +205,11 @@ class LiteLLMClient:
             )
 
     async def chat(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Sends one chat completion through LiteLLM.
+        """Sends one chat completion to the model endpoint.
 
         Raises:
             LiteLLMNotConfiguredError: The app has no key.
-            LiteLLMError: The model or LiteLLM failed; status_code says how.
+            LiteLLMError: The model or the endpoint failed; status_code says how.
         """
         try:
             async with httpx.AsyncClient(
@@ -198,7 +225,9 @@ class LiteLLMClient:
                 504,
             ) from e
         except httpx.HTTPError as e:
-            raise LiteLLMError(f"Could not reach LiteLLM at {self._base_url}: {e}", 502) from e
+            raise LiteLLMError(
+                f"Could not reach the model endpoint at {self._base_url}: {e}", 502
+            ) from e
         if response.status_code >= 400:
             raise LiteLLMError(_error_text(response), response.status_code)
         body: Any = response.json()

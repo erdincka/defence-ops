@@ -1,7 +1,7 @@
 [project]
 name = "defence-ops-llm-service"
 version = "1.2.0"
-description = "Sends Ops Centre questions with video context to models behind the in-cluster LiteLLM proxy."
+description = "Sends Ops Centre questions with video context to models behind LiteLLM or another OpenAI-compatible endpoint."
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.162.0",

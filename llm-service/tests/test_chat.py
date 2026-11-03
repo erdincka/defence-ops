@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 import main
 import prompts
-from litellm_client import LiteLLMClient, ModelCapabilities
+from litellm_client import AssumedCapabilities, LiteLLMClient, ModelCapabilities
 
 MODELS = {"data": [{"id": "nemotron-vl"}, {"id": "qwen3-vl"}, {"id": "text-only"}]}
 MODEL_INFO = {
@@ -56,8 +56,14 @@ class FakeLiteLLM:
         return httpx.Response(200, json={"choices": [{"message": message}]})
 
 
-def make_client(fake: FakeLiteLLM, key: str | None = "sk-test-defence-ops") -> LiteLLMClient:
-    return LiteLLMClient("http://litellm.test:4000", key, 30, 60, httpx.MockTransport(fake))
+def make_client(
+    fake: FakeLiteLLM,
+    key: str | None = "sk-test-defence-ops",
+    assumed: AssumedCapabilities | None = None,
+) -> LiteLLMClient:
+    return LiteLLMClient(
+        "http://litellm.test:4000", key, 30, 60, httpx.MockTransport(fake), assumed=assumed
+    )
 
 
 @pytest.fixture
@@ -100,6 +106,21 @@ def test_models_without_model_info_have_unknown_capabilities() -> None:
     models = asyncio.run(make_client(FakeLiteLLM(model_info_status=403)).list_models())
     assert [m.id for m in models] == ["nemotron-vl", "qwen3-vl", "text-only"]
     assert all(m.vision is None and m.reasoning is None for m in models)
+
+
+def test_assumed_capabilities_fill_what_the_endpoint_does_not_declare() -> None:
+    assumed = AssumedCapabilities(vision=True, video=True, reasoning=True)
+    direct = asyncio.run(
+        make_client(FakeLiteLLM(model_info_status=404), assumed=assumed).list_models()
+    )
+    assert all(m.vision and m.video and m.reasoning for m in direct)  # no /v1/model/info
+
+    proxied = asyncio.run(make_client(FakeLiteLLM(), assumed=assumed).list_models())
+    assert proxied == [  # what LiteLLM declares wins
+        ModelCapabilities("nemotron-vl", vision=True, video=True, reasoning=True),
+        ModelCapabilities("qwen3-vl", vision=True, video=True, reasoning=True),
+        ModelCapabilities("text-only", vision=False, video=True, reasoning=True),
+    ]
 
 
 def test_video_model_gets_one_clip(api: tuple[TestClient, FakeLiteLLM]) -> None:
@@ -187,6 +208,11 @@ def test_thinking_is_not_sent_to_other_models(
     [
         (
             {"content": "Clear.", "reasoning_content": "Checked all feeds."},
+            "Clear.",
+            "Checked all feeds.",
+        ),
+        (  # vLLM called directly
+            {"content": "Clear.", "reasoning": "Checked all feeds."},
             "Clear.",
             "Checked all feeds.",
         ),

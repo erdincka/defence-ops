@@ -31,10 +31,11 @@ chat box.
 
 Four services, each doing one job, running as four containers in one pod
 (`deployment/defence-ops`), each on its own port behind one Service: `app-ui` 3000,
-`kafka-service` 8001, `llm-service` 8002, `video-service` 8003. Models come from the
-cluster's LiteLLM proxy through the app's own key. The UI saves the configuration
-(model, Kafka broker and topic) to `config.json` on the `app-data` volume, and the
-other services read it from there. Secrets are not part of it: the LiteLLM key and
+`kafka-service` 8001, `llm-service` 8002, `video-service` 8003. Models come from an
+OpenAI-compatible endpoint, usually the cluster's LiteLLM proxy, through the app's own
+key. The UI saves the configuration (model, Kafka broker and topic) to `config.json` on
+the `app-data` volume, and the other services read it from there. Secrets are not part
+of it: the model key and
 the Kafka credentials are Kubernetes Secrets that only llm-service and kafka-service
 read, and only PCAI administrators can change the configuration.
 
@@ -50,7 +51,7 @@ flowchart TB
         kaf["<b>kafka-service</b><br/>FastAPI<br/><i>SSE telemetry · alert generation</i>"]
     end
 
-    model["Vision-language model<br/><i>through the in-cluster LiteLLM</i>"]
+    model["Vision-language model<br/><i>through LiteLLM, or served directly</i>"]
     broker[("Kafka broker<br/><i>mission telemetry</i>")]
 
     browser --> gw --> ui
@@ -72,7 +73,7 @@ flowchart TB
 
 A question travels: the UI sends the question, the names of the feeds in context and
 the latest telemetry to `llm-service`. That service checks what the selected model
-accepts, as LiteLLM declares it: video-capable models get one short Motion-JPEG clip
+accepts, as LiteLLM or the chart's values declare it: video-capable models get one short Motion-JPEG clip
 of the feeds, other vision models still frames, and a model that refuses video gets
 frames from then on. Thinking mode is switched on only for models that support it, and the model's
 reasoning comes back separately from the answer. The model is told which images show
@@ -87,7 +88,7 @@ detailed version.
 |---|---|---|
 | `app-ui` | Next.js 16, React 19 | Dashboard, admin, and the shared configuration store |
 | `video-service` | FastAPI | Feed playback, uploads, clips and frames for inference |
-| `llm-service` | FastAPI | Prompts, model capabilities and vision-language inference via LiteLLM |
+| `llm-service` | FastAPI | Prompts, model capabilities and vision-language inference via an OpenAI-compatible endpoint |
 | `kafka-service` | FastAPI | Live alerts over Server-Sent Events, sample alerts matched to the feeds |
 
 ## What you need
@@ -95,10 +96,14 @@ detailed version.
 - **[HPE Private Cloud AI](https://www.hpe.com/us/en/hpe-private-cloud-ai.html)**
   (PCAI), which supplies the cluster, the ingress with single sign-on and Keycloak.
   The app is built and tested on PCAI.
-- **A [LiteLLM](https://docs.litellm.ai/) proxy** the cluster can reach, with at least
-  one **vision-language model** (it must accept images, not just text) and a virtual key
-  for this app. LiteLLM is not part of every PCAI installation; the chart expects it at
-  `http://litellm.litellm.svc.cluster.local:4000` unless you set `llm.baseUrl`.
+- A **vision-language model** (it must accept images, not just text) behind an
+  OpenAI-compatible endpoint the cluster can reach, and a key for this app. Either:
+  - a **[LiteLLM](https://docs.litellm.ai/) proxy** with a virtual key. Administrators can
+    then switch between models, and LiteLLM declares what each accepts. LiteLLM is not part
+    of every PCAI installation; the chart expects it at
+    `http://litellm.litellm.svc.cluster.local:4000` unless you set `llm.baseUrl`; or
+  - **one model served directly**, such as an HPE Machine Learning Inference Software
+    (MLIS) deployment and a token for it.
 - *Optional:* a **Kafka broker** for the live alert ticker, such as the Kafka API of HPE
   Data Fabric, with a topic and a user that may produce to and consume from it. Without
   one the dashboard runs without the ticker.
@@ -106,7 +111,9 @@ detailed version.
 - Access to Docker Hub for the images (`erdincka/defence-ops-*`). In an air-gapped
   cluster, mirror them and set the image repositories (see [Values](#values)).
 
-## Set up LiteLLM
+## Set up the model endpoint
+
+### Through LiteLLM
 
 1. **Add your vision model(s)** to LiteLLM, from any OpenAI-compatible server: HPE
    Machine Learning Inference Software, vLLM, Ollama and so on.
@@ -131,6 +138,40 @@ detailed version.
 3. **Create a virtual key** for this app (*Virtual Keys*), limited to the models it
    should use. The app lists exactly the models this key may use.
 
+### A model served directly
+
+The app can call one model's own OpenAI-compatible endpoint, such as an MLIS deployment,
+with no LiteLLM in between. It uses only `/v1/models` and `/v1/chat/completions`.
+
+1. **Note the endpoint and a token.** For MLIS, the endpoint is the URL the deployment
+   shows, and the token is one created for that deployment. Tokens expire: when one
+   does, questions fail with HTTP 401 or 403 until the app has a new one.
+2. **Note the model's name**, the `id` that the endpoint lists:
+   ```bash
+   curl -s -H "Authorization: Bearer $MODEL_TOKEN" https://<endpoint>/v1/models
+   ```
+3. **Say what the model accepts.** A model served directly declares none of this, so
+   set it in the values from the model's documentation:
+   ```yaml
+   llm:
+     baseUrl: https://<endpoint>      # without /v1
+     apiKey: <token>                  # or llm.existingSecret
+     model: <id from /v1/models>
+     capabilities:
+       vision: true                   # required: the app sends still frames
+       video: false                   # true sends one short clip instead (vLLM, video-capable model)
+       reasoning: false               # true offers the Thinking switch
+   ```
+   Set `reasoning: true` for a model with a thinking mode (switched with
+   `chat_template_kwargs.enable_thinking` or `reasoning_effort`). Otherwise a model
+   that thinks by default always does, and answers take longer. Video and thinking were
+   tested this way with a Nemotron VL model on MLIS.
+
+One endpoint serves one model, so System Config offers only that one. The app checks
+the endpoint's TLS certificate against the certificate authorities in `SSL_CERT_FILE`.
+On PCAI that is the platform's own bundle, which PCAI mounts into every pod, so the
+app trusts what the platform trusts. Elsewhere it is the public authorities.
+
 ## Install on Private Cloud AI
 
 1. Package the chart:
@@ -142,8 +183,9 @@ detailed version.
    the values:
    - Keep the `ezua` block as it is: PCAI fills in `${DOMAIN_NAME}` and
      `${OIDC_CLIENT_ID}`.
-   - `llm.apiKey`: the LiteLLM key (or `llm.existingSecret`, below). `llm.model`: the
-     model to start with.
+   - `llm.apiKey`: the app's key for the model endpoint (or `llm.existingSecret`,
+     below). `llm.model`: the model to start with. For a model served directly, also
+     `llm.baseUrl` and `llm.capabilities` (see above).
    - For live alerts: `kafka.broker`, `kafka.topic`, `kafka.username` and
      `kafka.password` (or `kafka.existingSecret`), and `kafka.securityProtocol` and
      `kafka.saslMechanism` if your broker differs from SASL_PLAINTEXT with PLAIN.
@@ -160,7 +202,7 @@ its Helm release, where cluster administrators can read them. To keep them out o
 there, create the Secrets yourself before importing, and name them in the values instead:
 
 ```bash
-kubectl -n <namespace> create secret generic defence-ops-litellm --from-file=api-key=<file with the key>
+kubectl -n <namespace> create secret generic defence-ops-llm --from-file=api-key=<file with the key>
 kubectl -n <namespace> create secret generic defence-ops-kafka \
   --from-file=username=<file with the user> --from-file=password=<file with the password>
 ```
@@ -168,7 +210,7 @@ kubectl -n <namespace> create secret generic defence-ops-kafka \
 ```yaml
 llm:
   existingSecret:
-    name: defence-ops-litellm
+    name: defence-ops-llm
     key: api-key
 kafka:
   existingSecret:
@@ -187,7 +229,7 @@ helm install defence-ops ./helm --namespace defence-ops --create-namespace \
   --set ezua.domainName=<your domain> \
   --set ezua.oidc.client_id=<OIDC client the sign-in uses> \
   --set ezua.virtualService.endpoint=defence-ops.<your domain> \
-  --set llm.existingSecret.name=defence-ops-litellm
+  --set llm.existingSecret.name=defence-ops-llm
 ```
 
 That path is not the supported one.
@@ -199,10 +241,11 @@ That path is not the supported one.
 | `ezua.domainName` | `${DOMAIN_NAME}` | Cluster domain; the Keycloak issuer is `https://keycloak.<domain>/realms/UA` |
 | `ezua.oidc.client_id` | `${OIDC_CLIENT_ID}` | Audience of the sign-in token that identifies administrators |
 | `ezua.virtualService.endpoint` | `defence-ops.${DOMAIN_NAME}` | Hostname of the app |
-| `llm.baseUrl` | `http://litellm.litellm.svc.cluster.local:4000` | LiteLLM proxy |
-| `llm.apiKey` / `llm.existingSecret` | none | The app's LiteLLM key |
+| `llm.baseUrl` | `http://litellm.litellm.svc.cluster.local:4000` | Model endpoint, without `/v1`: LiteLLM or a model served directly |
+| `llm.apiKey` / `llm.existingSecret` | none | The app's key for that endpoint |
 | `llm.model` | none | Model until an administrator picks one |
 | `llm.maxImages` | `5` | Frames per question for models without video |
+| `llm.capabilities.vision`, `.video`, `.reasoning` | empty (unknown) | What the model accepts where the endpoint does not declare it: `true` or `false` |
 | `kafka.broker`, `kafka.topic` | none | Kafka target until an administrator sets one |
 | `kafka.securityProtocol` | `SASL_PLAINTEXT` | `PLAINTEXT`, `SSL`, `SASL_PLAINTEXT` or `SASL_SSL` |
 | `kafka.saslMechanism` | `PLAIN` | `PLAIN`, `SCRAM-SHA-256` or `SCRAM-SHA-512` |

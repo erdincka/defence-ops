@@ -31,12 +31,13 @@ serviceAccount:
   create: true
   name: ""
 
-# Models come from a LiteLLM proxy (OpenAI-compatible) with a virtual key for this app. Which models
-# take images, video and thinking mode comes from each model's model_info in LiteLLM.
+# Models come from an OpenAI-compatible endpoint: a LiteLLM proxy with a virtual key for this app,
+# or one model served directly, such as an HPE MLIS deployment with its token.
 llm:
+  # Without the /v1 suffix
   baseUrl: http://litellm.litellm.svc.cluster.local:4000
-  # The app's LiteLLM key. Either give it here, and the chart stores it in a Secret, or name a
-  # Secret that already holds it (existingSecret wins when both are set).
+  # The app's key for that endpoint. Either give it here, and the chart stores it in a Secret, or
+  # name a Secret that already holds it (existingSecret wins when both are set).
   apiKey: ""
   existingSecret:
     name: ""
@@ -45,6 +46,13 @@ llm:
   model: ""
   # Frames sent to a model that takes images but not video
   maxImages: 5
+  # What the model accepts, as true or false; empty leaves it unknown. LiteLLM declares these in each
+  # model's model_info, and what it declares wins. A model served directly declares nothing, so set
+  # them here: unknown means still frames rather than video, and no thinking switch.
+  capabilities:
+    vision: ""
+    video: ""
+    reasoning: ""
 
 # Live alerts from a Kafka broker (optional: without one the dashboard runs without the ticker).
 kafka:

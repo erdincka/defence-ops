@@ -7,7 +7,7 @@ This guide walks through a demonstration of the **Defence-Ops** tactical intelli
 Configure the model and the Kafka datalink once, or when you need to switch models or clusters.
 
 1.  **Open Settings**: Click **System Config** (gear icon) in the navigation bar. Only PCAI administrators can change these settings; everyone else sees them read-only, with the reason. Press **Esc** or the **✕** to close it.
-2.  **Model**: Pick a model from the list of models this app's key may use on the in-cluster LiteLLM. Badges show whether it takes **Vision**, **Video** and **Thinking**; choose one with Vision.
+2.  **Model**: Pick a model from the list of models this app's key may use on the model endpoint (LiteLLM, or a model served directly). Badges show whether it takes **Vision**, **Video** and **Thinking**; choose one with Vision. **Unknown** means the endpoint does not declare it: set `llm.capabilities` in the app's Helm values.
     *   Models with Video receive a short clip of the selected feeds; other vision models receive still frames.
     *   The chat's **Thinking** toggle is available only for models with Thinking.
 3.  **Data Fabric (Optional)**:
