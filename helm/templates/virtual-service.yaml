@@ -39,15 +39,6 @@ spec:
       timeout: 600s
     - match:
         - uri:
-            prefix: "/api/v1/models"
-      route:
-        - destination:
-            host: {{ $host }}
-            port:
-              number: {{ .Values.llmService.port }}
-      timeout: 600s
-    - match:
-        - uri:
             prefix: "/api/v1/kafka"
       route:
         - destination:

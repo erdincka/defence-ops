@@ -13,7 +13,7 @@ global:
   # Extra environment variables for every container, as a list of Kubernetes EnvVar objects.
   extraEnv: []
   image:
-    tag: "1.1.0"
+    tag: "1.2.1"
     pullPolicy: IfNotPresent
 
 replicaCount: 1
@@ -21,6 +21,47 @@ replicaCount: 1
 serviceAccount:
   create: true
   name: ""
+
+# Models come from the in-cluster LiteLLM proxy with the app's own virtual key, kept in a Secret
+# created outside the release: kubectl create secret generic defence-ops-litellm
+# --from-file=api-key=<key file>. Model capabilities (vision, video, reasoning) come from LiteLLM's
+# model_info for each model.
+llm:
+  baseUrl: http://litellm.litellm.svc.cluster.local:4000
+  apiKeySecret:
+    name: defence-ops-litellm
+    key: api-key
+  # Frames sent to a model that takes images but not video
+  maxImages: 5
+
+# Broker and topic are set on System Config; the credentials are a Secret created outside the
+# release, with keys username and password, for a user limited to the alerts stream.
+kafka:
+  credentialsSecret:
+    name: defence-ops-kafka
+  securityProtocol: SASL_PLAINTEXT
+  saslMechanism: PLAIN
+
+# Who may change System Config. oidc verifies the Keycloak ID token oauth2-proxy forwards and
+# needs adminRole among the user's realm roles; open lets anyone, for the Tilt dev loop only.
+settings:
+  auth: oidc
+  adminRole: admin
+  oidc:
+    issuer: "https://keycloak.${DOMAIN_NAME}/realms/UA"
+    audience: ua
+
+# Only the Istio ingress gateway may reach the pod, so nothing in the cluster can go round SSO.
+networkPolicy:
+  enabled: true
+  ingressGateway:
+    namespace: istio-system
+    podLabels:
+      istio: ingressgateway
+
+securityContext:
+  # The Tilt dev loop turns this off so that it can sync files into the containers.
+  readOnlyRootFilesystem: true
 
 # Holds config.json, which the settings page writes and the services read. The claim keeps the name
 # app-data so that upgrades from chart 0.0.x keep the saved settings.
@@ -73,7 +114,8 @@ videoService:
   image: erdincka/defence-ops-video-service
   port: 8003
   probePath: /health
-  # The upload endpoint holds the whole file in memory, hence the higher limit.
+  # Custom uploads live on a scratch volume until the pod restarts
+  maxUploadMB: 200
   resources:
     requests:
       cpu: 250m

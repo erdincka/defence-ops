@@ -78,6 +78,18 @@ Environment shared by every container. Call with (dict "root" $ "service" .Value
 {{- end }}
 
 {{/*
+Security context for every container: non-root (set on the pod), no privilege escalation, no
+capabilities, and a read-only root filesystem outside the Tilt dev loop.
+*/}}
+{{- define "defence-ops.containerSecurityContext" -}}
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: {{ .Values.securityContext.readOnlyRootFilesystem }}
+  capabilities:
+    drop: ["ALL"]
+{{- end }}
+
+{{/*
 Probes for one container. Call with the service's values; the startup probe gives Next.js and
 uvicorn up to two minutes to come up, which dev mode needs for its first compile.
 */}}

@@ -31,10 +31,12 @@ chat box.
 
 Four services, each doing one job, running as four containers in one pod
 (`deployment/defence-ops`), each on its own port behind one Service: `app-ui` 3000,
-`kafka-service` 8001, `llm-service` 8002, `video-service` 8003. The UI saves the
-configuration to `config.json` on the `app-data` volume, and the other services read
-it from there. API keys and passwords stay on the server: the System Config page
-never receives them back.
+`kafka-service` 8001, `llm-service` 8002, `video-service` 8003. Models come from the
+cluster's LiteLLM proxy through the app's own key. The UI saves the configuration
+(model, Kafka broker and topic) to `config.json` on the `app-data` volume, and the
+other services read it from there. Secrets are not part of it: the LiteLLM key and
+the Kafka credentials are Kubernetes Secrets that only llm-service and kafka-service
+read, and only PCAI administrators can change the configuration.
 
 ```mermaid
 flowchart TB
@@ -43,20 +45,20 @@ flowchart TB
 
     subgraph ns ["One pod"]
         ui["<b>app-ui</b><br/>Next.js dashboard<br/><i>+ config store (PVC)</i>"]
-        vid["<b>video-service</b><br/>FastAPI<br/><i>MJPEG streams · frame extraction</i>"]
-        llm["<b>llm-service</b><br/>FastAPI<br/><i>VLM orchestration · model discovery</i>"]
+        vid["<b>video-service</b><br/>FastAPI<br/><i>feed playback · clips and frames</i>"]
+        llm["<b>llm-service</b><br/>FastAPI<br/><i>VLM orchestration · model capabilities</i>"]
         kaf["<b>kafka-service</b><br/>FastAPI<br/><i>SSE telemetry · alert generation</i>"]
     end
 
-    model["Vision-language model<br/><i>any OpenAI-compatible endpoint</i>"]
+    model["Vision-language model<br/><i>through the in-cluster LiteLLM</i>"]
     broker[("Kafka broker<br/><i>mission telemetry</i>")]
 
     browser --> gw --> ui
     gw --> vid
     gw --> llm
     gw --> kaf
-    ui -->|"frames for the active feeds"| vid
-    ui -->|"prompt + frames + recent alerts"| llm
+    ui -->|"prompt + feed names + recent alerts"| llm
+    llm -->|"clip or frames for those feeds"| vid
     ui -->|"live alert stream (SSE)"| kaf
     llm -->|"inference"| model
     kaf <-->|"SASL"| broker
@@ -68,25 +70,41 @@ flowchart TB
     style ns fill:#ffffff,stroke:#c7d2fe,stroke-width:1px,color:#3730a3;
 ```
 
-A question travels: the UI pulls recent frames for whichever feeds are playing, adds
-the latest telemetry, and posts the lot to `llm-service`, which forwards it to the
-model endpoint you configured. [DIAGRAM.md](./DIAGRAM.md) has the detailed version.
+A question travels: the UI sends the question, the names of the feeds in context and
+the latest telemetry to `llm-service`. That service checks what the selected model
+accepts, as LiteLLM declares it: video-capable models get one short Motion-JPEG clip
+of the feeds, other vision models still frames, and a model that refuses video gets
+frames from then on. Thinking mode is switched on only for models that support it, and the model's
+reasoning comes back separately from the answer. The model is told which images show
+which feed, and fixed operating rules come ahead of the operators' own instructions:
+answer only from the imagery and alerts supplied, separate what is observed from what
+is assessed, keep a concise military register, and give no targeting details. The
+**Generate Alerts** button writes sample alerts about the feeds in the grid, so the
+ticker and the imagery tell one story. [DIAGRAM.md](./DIAGRAM.md) has the
+detailed version.
 
 | Service | Stack | Responsibility |
 |---|---|---|
-| `app-ui` | Next.js 15, React 19 | Dashboard, admin, and the shared configuration store |
-| `video-service` | FastAPI | MJPEG streaming, uploads, frame extraction for inference |
-| `llm-service` | FastAPI | Model discovery and vision-language inference |
-| `kafka-service` | FastAPI | Telemetry over Server-Sent Events, alert generation |
+| `app-ui` | Next.js 16, React 19 | Dashboard, admin, and the shared configuration store |
+| `video-service` | FastAPI | Feed playback, uploads, clips and frames for inference |
+| `llm-service` | FastAPI | Prompts, model capabilities and vision-language inference via LiteLLM |
+| `kafka-service` | FastAPI | Live alerts over Server-Sent Events, sample alerts matched to the feeds |
 
 ## What you need
 
 - **[HPE Private Cloud AI](https://www.hpe.com/us/en/hpe-private-cloud-ai.html)**,
   which supplies the cluster, the model-serving endpoints and the ingress, with
   `kubectl` and `helm` configured against it.
-- **A vision-language model** on any OpenAI-compatible endpoint — the model must
-  accept images, not just text. `nemotron-nano-12b-v2-vl` and `qwen3-vl:8b` both
-  work well. A text-only model will deploy and then fail to describe anything.
+- **A vision-language model** behind the cluster's LiteLLM proxy, and a LiteLLM key
+  for this app, stored as Secret `defence-ops-litellm` (key `api-key`) in the app's
+  namespace. The model must accept images, not just text.
+- **Capability flags on each model in LiteLLM.** Models don't report what they accept
+  through LiteLLM, and LiteLLM only knows that for models in its own catalogue. So set
+  `supports_vision`, `supports_video_input` and `supports_reasoning` in each model's
+  **Model Info** (LiteLLM UI: Models + Endpoints → model → Edit Settings). Unset flags
+  mean frames and no thinking mode. Through LiteLLM only vLLM-served models (MLIS
+  Nemotron VL) take a video clip; for Ollama models LiteLLM itself rejects video, so set
+  `supports_video_input: false` there.
 - *Optional:* a Kafka broker for live telemetry. Without one the dashboard runs on
   generated alerts, which is enough to demo it.
 
@@ -117,18 +135,15 @@ takes a packaged chart and a logo: give it `defence-ops-<version>.tgz` and
 
 ### First run
 
-Open **System Config** in the navigation bar and set:
+As a PCAI administrator, open **System Config** in the navigation bar and set:
 
 | Setting | Value |
 |---|---|
-| API format | `OpenAI compatible` |
-| Endpoint URL | Your model endpoint |
-| Model | A **vision** model, e.g. `nemotron-nano-12b-v2-vl` |
-| API token | The endpoint's key |
-| Kafka *(optional)* | Broker URI, username, password |
+| Model | A **vision** model from the list LiteLLM offers this app's key |
+| Kafka *(optional)* | Broker (`host:port`) and topic |
 
-Saved tokens and passwords are not shown again: the fields read "Saved – leave blank
-to keep", and saving with them blank keeps the stored values.
+The Kafka credentials are Secret `defence-ops-kafka` (keys `username` and `password`)
+for a user limited to that stream. Everyone else sees System Config read-only.
 
 Then pick a feed in any grid cell and press play. First load of each video is slow
 while it is fetched and cached; after that it is instant.
@@ -162,27 +177,36 @@ pushes only that tag; `latest` stays on the 1.0.x multi-pod images.
 
 ```bash
 docker login -u erdincka
-./scripts/publish_images.sh 1.1.0
+./scripts/publish_images.sh 1.2.1
 ```
 
 Then set `global.image.tag` in `helm/values.yaml`.
+
+Each Python service is a uv project (`pyproject.toml`, `uv.lock`) with its own tests;
+run them in a container, never on the workstation, for example:
+
+```bash
+docker run --rm -v "$PWD":/work -w /work/llm-service python:3.12-slim sh -c 'pip install -q uv==0.13.6 && UV_PROJECT_ENVIRONMENT=/tmp/venv uv run --frozen pytest -q'
+```
 
 ### Releasing on lonpcai
 
 The Import Framework app is EzAppConfig `defence-ops-0.0.1-1774573363791`; its job runs
 `helm upgrade` from the platform chartmuseum with the record's `chartVersion` and
-`values`.
+`values`. The Secrets `defence-ops-litellm` and `defence-ops-kafka` must exist in the
+namespace first; the 1.2.0 rollout steps are in `~/Applications/lonpcai/defence-ops/README.md`.
 
 1. Publish the images with the release tag (above).
 2. Package the chart: `helm package helm -d dist`.
 3. Upload it to the chartmuseum (a protected namespace, so the cluster owner does this):
    ```bash
-   kubectl --context lonpcai create --raw /api/v1/namespaces/ez-chartmuseum-ns/services/chartmuseum:8080/proxy/api/charts -f dist/defence-ops-0.1.0.tgz
+   kubectl --context lonpcai create --raw /api/v1/namespaces/ez-chartmuseum-ns/services/chartmuseum:8080/proxy/api/charts -f dist/defence-ops-0.2.1.tgz
    ```
-4. Point the record at the new version, with values that only set the endpoint:
+4. Point the record at the new version. The values set the endpoint and the Keycloak
+   issuer, so that `${DOMAIN_NAME}` is substituted in both:
    ```bash
    kubectl --context lonpcai patch ezappconfig defence-ops-0.0.1-1774573363791 --type merge \
-     -p '{"spec":{"chartVersion":"0.1.0","values":"ezua:\n  virtualService:\n    endpoint: \"defence-ops.${DOMAIN_NAME}\"\n    istioGateway: \"istio-system/ezaf-gateway\"\n"}}'
+     -p '{"spec":{"chartVersion":"0.2.1","values":"ezua:\n  virtualService:\n    endpoint: \"defence-ops.${DOMAIN_NAME}\"\n    istioGateway: \"istio-system/ezaf-gateway\"\nsettings:\n  oidc:\n    issuer: \"https://keycloak.${DOMAIN_NAME}/realms/UA\"\n"}}'
    ```
 5. Check: the record shows `ready` with health `ok`, and `deployment/defence-ops` in
    `defence-ops` is 4/4 ready.

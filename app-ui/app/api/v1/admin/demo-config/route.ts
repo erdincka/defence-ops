@@ -2,23 +2,32 @@ import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 import { z } from "zod";
+import { settingsAccess } from "@/lib/auth";
 
+// Runtime data on the app-data volume, not a build asset: the turbopackIgnore comments below keep
+// the build from tracing the whole project because of these dynamic paths.
 const CONFIG_PATH = process.env.CONFIG_PATH || "/app/data/config.json";
 
-// Secrets never leave the server: GET blanks them and lists which are stored, and a blank value in
-// a POST keeps the stored one. The backends read them from CONFIG_PATH on the shared volume.
-const SECRET_FIELDS = ["llm_api_key", "kafka_password"] as const;
-
+// System Config holds no secrets: the LiteLLM key and the Kafka credentials are Kubernetes
+// Secrets that only llm-service and kafka-service read. Saving rewrites demo_services with
+// these fields alone, which also drops the keys older versions stored here.
 const demoServicesSchema = z.object({
-  llm_endpoint: z.string().trim().max(500).default(""),
-  llm_api_key: z.string().trim().max(500).default(""),
   llm_model: z.string().trim().max(200).default(""),
-  llm_provider: z.enum(["openai", "ollama"]).default("openai"),
-  kafka_broker: z.string().trim().max(500).default(""),
-  kafka_topic: z.string().trim().max(249).default(""),
-  kafka_username: z.string().trim().max(200).default(""),
-  kafka_password: z.string().max(500).default(""),
+  kafka_broker: z
+    .string()
+    .trim()
+    .max(500)
+    .regex(/^$|^[\w.-]+:\d{1,5}(,[\w.-]+:\d{1,5})*$/, "use host:port, comma-separated")
+    .default(""),
+  kafka_topic: z
+    .string()
+    .trim()
+    .max(249)
+    .regex(/^$|^[\w./:-]+$/, "use letters, digits and . _ - / : only")
+    .default(""),
 });
+
+type DemoServices = z.infer<typeof demoServicesSchema>;
 
 const storedConfigSchema = z.looseObject({
   demo_services: z.record(z.string(), z.unknown()).optional(),
@@ -37,7 +46,7 @@ function errorResponse(message: string, status: number) {
 async function loadConfig(): Promise<StoredConfig> {
   let text: string;
   try {
-    text = await fs.readFile(CONFIG_PATH, "utf-8");
+    text = await fs.readFile(/*turbopackIgnore: true*/ CONFIG_PATH, "utf-8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return {};
     throw err;
@@ -46,23 +55,26 @@ async function loadConfig(): Promise<StoredConfig> {
 }
 
 async function saveConfig(config: StoredConfig): Promise<void> {
-  await fs.mkdir(path.dirname(CONFIG_PATH), { recursive: true });
+  await fs.mkdir(/*turbopackIgnore: true*/ path.dirname(CONFIG_PATH), { recursive: true });
   // Write a temporary file and rename it, so a failed write never leaves half a file behind.
   const tmpPath = `${CONFIG_PATH}.tmp`;
-  await fs.writeFile(tmpPath, JSON.stringify(config, null, 2));
-  await fs.rename(tmpPath, CONFIG_PATH);
+  await fs.writeFile(/*turbopackIgnore: true*/ tmpPath, JSON.stringify(config, null, 2));
+  await fs.rename(/*turbopackIgnore: true*/ tmpPath, /*turbopackIgnore: true*/ CONFIG_PATH);
 }
 
-export async function GET() {
+function publicSettings(stored: Record<string, unknown>): DemoServices {
+  const text = (key: keyof DemoServices) => (typeof stored[key] === "string" ? (stored[key] as string) : "");
+  return { llm_model: text("llm_model"), kafka_broker: text("kafka_broker"), kafka_topic: text("kafka_topic") };
+}
+
+export async function GET(request: NextRequest) {
   try {
-    const services = (await loadConfig()).demo_services ?? {};
-    const storedSecrets = SECRET_FIELDS.filter((field) => {
-      const value = services[field];
-      return typeof value === "string" && value !== "";
+    const [config, access] = await Promise.all([loadConfig(), settingsAccess(request.headers)]);
+    return NextResponse.json({
+      status: "success",
+      data: publicSettings(config.demo_services ?? {}),
+      meta: { can_edit: access.canEdit, reason: access.reason },
     });
-    const data: Record<string, unknown> = { ...services };
-    for (const field of SECRET_FIELDS) data[field] = "";
-    return NextResponse.json({ status: "success", data, meta: { stored_secrets: storedSecrets } });
   } catch (err) {
     return errorResponse(
       `Could not read the saved settings from ${CONFIG_PATH}: ${describe(err)}. ` +
@@ -73,6 +85,11 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const access = await settingsAccess(request.headers);
+  if (!access.canEdit) {
+    return errorResponse(`Settings not saved: ${access.reason}`, 403);
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -90,12 +107,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const current = await loadConfig();
-    const stored = current.demo_services ?? {};
-    const merged: Record<string, unknown> = { ...parsed.data };
-    for (const field of SECRET_FIELDS) {
-      if (parsed.data[field] === "" && typeof stored[field] === "string") merged[field] = stored[field];
-    }
-    await saveConfig({ ...current, demo_services: merged });
+    await saveConfig({ ...current, demo_services: parsed.data });
   } catch (err) {
     return errorResponse(
       `Settings not saved: could not write ${CONFIG_PATH} (${describe(err)}). ` +
@@ -104,5 +116,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  console.info(JSON.stringify({ event: "settings_saved", user: access.user, ...parsed.data }));
   return NextResponse.json({ status: "success", message: "Configuration saved successfully" });
 }

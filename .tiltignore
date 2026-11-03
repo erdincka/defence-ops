@@ -11,3 +11,9 @@ defence-ops-ezapp.yaml
 **/.next/
 **/__pycache__/
 **/.venv/
+# Editor temp files and test caches: they are not in any sync() path, so Tilt would rebuild the pod.
+**/*.tmp.*
+**/pytest-cache-files-*/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/

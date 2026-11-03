@@ -19,6 +19,17 @@ spec:
         {{- include "defence-ops.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "defence-ops.serviceAccountName" . }}
+      # Nothing in the pod calls the Kubernetes API.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        # Lets the app user write config.json on app-data
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: app-ui
           image: "{{ .Values.appUi.image }}:{{ .Values.global.image.tag }}"
@@ -28,12 +39,29 @@ spec:
               containerPort: {{ .Values.appUi.port }}
           env:
             {{- include "defence-ops.env" (dict "root" . "service" .Values.appUi) | nindent 12 }}
+            - name: SETTINGS_AUTH
+              value: {{ .Values.settings.auth | quote }}
+            - name: ADMIN_ROLE
+              value: {{ .Values.settings.adminRole | quote }}
+            - name: OIDC_ISSUER
+              value: {{ .Values.settings.oidc.issuer | quote }}
+            - name: OIDC_AUDIENCE
+              value: {{ .Values.settings.oidc.audience | quote }}
+            - name: NPM_CONFIG_CACHE
+              value: /tmp/.npm
+            - name: NPM_CONFIG_UPDATE_NOTIFIER
+              value: "false"
           {{- include "defence-ops.probes" .Values.appUi | nindent 10 }}
+          {{- include "defence-ops.containerSecurityContext" . | nindent 10 }}
           resources:
             {{- toYaml .Values.appUi.resources | nindent 12 }}
           volumeMounts:
             - name: app-data
               mountPath: /app/data
+            - name: tmp
+              mountPath: /tmp
+            - name: next-cache
+              mountPath: /app/.next/cache
         - name: kafka-service
           image: "{{ .Values.kafkaService.image }}:{{ .Values.global.image.tag }}"
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
@@ -42,13 +70,32 @@ spec:
               containerPort: {{ .Values.kafkaService.port }}
           env:
             {{- include "defence-ops.env" (dict "root" . "service" .Values.kafkaService) | nindent 12 }}
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: {{ .Values.kafka.securityProtocol | quote }}
+            - name: KAFKA_SASL_MECHANISM
+              value: {{ .Values.kafka.saslMechanism | quote }}
+            - name: KAFKA_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kafka.credentialsSecret.name }}
+                  key: username
+                  optional: true
+            - name: KAFKA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kafka.credentialsSecret.name }}
+                  key: password
+                  optional: true
           {{- include "defence-ops.probes" .Values.kafkaService | nindent 10 }}
+          {{- include "defence-ops.containerSecurityContext" . | nindent 10 }}
           resources:
             {{- toYaml .Values.kafkaService.resources | nindent 12 }}
           volumeMounts:
             - name: app-data
               mountPath: /app/data
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
         - name: llm-service
           image: "{{ .Values.llmService.image }}:{{ .Values.global.image.tag }}"
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
@@ -57,13 +104,28 @@ spec:
               containerPort: {{ .Values.llmService.port }}
           env:
             {{- include "defence-ops.env" (dict "root" . "service" .Values.llmService) | nindent 12 }}
+            - name: LITELLM_BASE_URL
+              value: {{ .Values.llm.baseUrl | quote }}
+            - name: LITELLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.llm.apiKeySecret.name }}
+                  key: {{ .Values.llm.apiKeySecret.key }}
+                  optional: true
+            - name: VIDEO_SERVICE_URL
+              value: "http://127.0.0.1:{{ .Values.videoService.port }}"
+            - name: MAX_IMAGES
+              value: {{ .Values.llm.maxImages | quote }}
           {{- include "defence-ops.probes" .Values.llmService | nindent 10 }}
+          {{- include "defence-ops.containerSecurityContext" . | nindent 10 }}
           resources:
             {{- toYaml .Values.llmService.resources | nindent 12 }}
           volumeMounts:
             - name: app-data
               mountPath: /app/data
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
         - name: video-service
           image: "{{ .Values.videoService.image }}:{{ .Values.global.image.tag }}"
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
@@ -72,10 +134,30 @@ spec:
               containerPort: {{ .Values.videoService.port }}
           env:
             {{- include "defence-ops.env" (dict "root" . "service" .Values.videoService) | nindent 12 }}
+            - name: UPLOAD_DIR
+              value: /app/data/videos
+            - name: MAX_UPLOAD_MB
+              value: {{ .Values.videoService.maxUploadMB | quote }}
           {{- include "defence-ops.probes" .Values.videoService | nindent 10 }}
+          {{- include "defence-ops.containerSecurityContext" . | nindent 10 }}
           resources:
             {{- toYaml .Values.videoService.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: uploads
+              mountPath: /app/data/videos
       volumes:
         - name: app-data
           persistentVolumeClaim:
             claimName: {{ .Values.persistence.claimName }}
+        # Scratch space for the read-only containers: temp files, Next.js's cache, uploads
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: next-cache
+          emptyDir:
+            sizeLimit: 512Mi
+        - name: uploads
+          emptyDir:
+            sizeLimit: {{ mul .Values.videoService.maxUploadMB 2 }}Mi

@@ -1,18 +1,18 @@
 FROM --platform=linux/amd64 node:24-slim
 
+RUN groupadd -g 10001 app && useradd -u 10001 -g app -m app
 WORKDIR /app
+RUN chown app:app /app
+# Everything below runs as the app user, which owns the code so that Tilt's live update works
+USER 10001
 
 # Install dependencies exactly as locked
-COPY app-ui/package*.json ./
+COPY --chown=10001:10001 app-ui/package*.json ./
 RUN npm ci
 
 # Copy application code
-COPY app-ui/ .
-COPY USAGE.md DIAGRAM.md ./
-
-# Build argument for domain
-ARG DOMAIN
-ENV DOMAIN=${DOMAIN}
+COPY --chown=10001:10001 app-ui/ .
+COPY --chown=10001:10001 USAGE.md DIAGRAM.md ./
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -28,4 +28,3 @@ CMD if [ "$ENV" = "development" ]; then \
     else \
       npm start; \
     fi
-
