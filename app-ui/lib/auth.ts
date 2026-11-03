@@ -6,6 +6,9 @@ import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 const SETTINGS_AUTH = process.env.SETTINGS_AUTH ?? "oidc"; // "open" only for the Tilt dev loop
 const OIDC_ISSUER = (process.env.OIDC_ISSUER ?? "").replace(/\/+$/, "");
 const OIDC_AUDIENCE = process.env.OIDC_AUDIENCE ?? "ua";
+// Where to fetch Keycloak's signing keys. The chart points it at Keycloak's in-cluster Service, as
+// PCAI's own oauth2-proxy does, so a self-signed ingress certificate does not break the check.
+const OIDC_JWKS_URL = process.env.OIDC_JWKS_URL || `${OIDC_ISSUER}/protocol/openid-connect/certs`;
 const ADMIN_ROLE = process.env.ADMIN_ROLE ?? "admin";
 
 let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
@@ -43,7 +46,7 @@ export async function settingsAccess(headers: Headers): Promise<SettingsAccess> 
     return { canEdit: false, user: null, reason: "No sign-in token reached the app, so settings are read-only." };
   }
   try {
-    jwks ??= createRemoteJWKSet(new URL(`${OIDC_ISSUER}/protocol/openid-connect/certs`));
+    jwks ??= createRemoteJWKSet(new URL(OIDC_JWKS_URL));
     const { payload } = await jwtVerify(token, jwks, { issuer: OIDC_ISSUER, audience: OIDC_AUDIENCE });
     const user =
       (typeof payload.preferred_username === "string" ? payload.preferred_username : null) ?? payload.sub ?? null;

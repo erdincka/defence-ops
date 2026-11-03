@@ -376,6 +376,8 @@
   gap: 8px;
 }
 .contextSelect {
+  box-sizing: border-box;
+  max-width: 100%;
   background: #0f172a;
   color: #94a3b8;
   border: 1px solid #334155;
@@ -393,6 +395,9 @@
   outline: none;
   font-size: 13px;
   width: 100%;
+  /* Padding and border inside the 100%, or the box sticks out past the panel's right edge. */
+  box-sizing: border-box;
+  min-width: 0;
 }
 .chatInput:focus {
   border-color: #38bdf8;

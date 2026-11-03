@@ -12,7 +12,7 @@ Configure the model and the Kafka datalink once, or when you need to switch mode
     *   The chat's **Thinking** toggle is available only for models with Thinking.
 3.  **Data Fabric (Optional)**:
     *   To stream live alerts, enter the **Broker** (`broker-host:port`) and the **Topic**.
-    *   The credentials are a Kubernetes Secret the cluster administrator sets up; they are not entered here.
+    *   The credentials come from the app's Helm values, set when the app is imported; they are not entered here.
 4.  **Save**: Click "Save Configuration" to apply the settings.
 
 ---
@@ -39,7 +39,7 @@ The chat is the most flexible way to work with the assistant. Type any question,
 
 #### 🧠 Thinking Mode
 - **Checked**: the model reasons before it answers; open **Reasoning** above the answer to see how it got there. Use it for assessments where the logic matters.
-- **Unchecked**: direct, faster answers. Some models (qwen3-vl) reason anyway; their reasoning is folded away in the same way.
+- **Unchecked**: direct, faster answers. Some models reason anyway; their reasoning is folded away in the same way.
 
 #### 🎯 Context Selection
 - **Smart (Active Streams)**: every playing feed plus the recent alerts. Use it for questions such as *"Is there any coordinated movement across the sectors?"*

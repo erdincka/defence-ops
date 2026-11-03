@@ -10,7 +10,7 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-dist/
+# dist/
 downloads/
 eggs/
 .eggs/
@@ -162,3 +162,10 @@ Thumbs.db
 
 # Local config
 config.json
+
+# Tilt settings for your cluster (copy tilt_config.example.json)
+tilt_config.json
+
+# Packaged charts: publish them as release assets, not in git
+dist/
+*.tgz

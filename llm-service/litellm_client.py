@@ -83,8 +83,7 @@ class LiteLLMClient:
     def _headers(self) -> dict[str, str]:
         if not self._api_key:
             raise LiteLLMNotConfiguredError(
-                "No LiteLLM key: create Secret defence-ops-litellm (key api-key) in the app's "
-                "namespace, then restart the pod."
+                "No LiteLLM key: set llm.apiKey, or llm.existingSecret, in the app's Helm values."
             )
         return {"Authorization": f"Bearer {self._api_key}"}
 

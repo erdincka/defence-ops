@@ -15,12 +15,16 @@ def use(monkeypatch: pytest.MonkeyPatch, **values: object) -> None:
 
 def test_sasl_without_credentials_explains_the_fix(monkeypatch: pytest.MonkeyPatch) -> None:
     use(monkeypatch)
-    with pytest.raises(main.KafkaNotConfiguredError, match="defence-ops-kafka"):
+    with pytest.raises(main.KafkaNotConfiguredError, match="kafka.username"):
         main.connection_kwargs("df.example:9092")
 
 
 def test_sasl_plaintext_uses_the_secret(monkeypatch: pytest.MonkeyPatch) -> None:
-    use(monkeypatch, kafka_username="defence-ops", kafka_password=SecretStr("not-a-real-pw"))
+    use(
+        monkeypatch,
+        kafka_sasl_username="defence-ops",
+        kafka_sasl_password=SecretStr("not-a-real-pw"),
+    )
     kwargs = main.connection_kwargs("df.example:9092")
     assert kwargs["security_protocol"] == "SASL_PLAINTEXT"
     assert kwargs["sasl_mechanism"] == "PLAIN"
@@ -32,8 +36,8 @@ def test_sasl_plaintext_uses_the_secret(monkeypatch: pytest.MonkeyPatch) -> None
 def test_sasl_ssl_adds_a_tls_context(monkeypatch: pytest.MonkeyPatch) -> None:
     use(
         monkeypatch,
-        kafka_username="defence-ops",
-        kafka_password=SecretStr("not-a-real-pw"),
+        kafka_sasl_username="defence-ops",
+        kafka_sasl_password=SecretStr("not-a-real-pw"),
         kafka_security_protocol="SASL_SSL",
     )
     assert "ssl_context" in main.connection_kwargs("df.example:9093")
@@ -93,7 +97,11 @@ def test_stream_subscribes_so_the_gateway_sends_topic_metadata(
     async def target() -> tuple[str, str]:
         return "df.example:9092", "tactical-alerts"
 
-    use(monkeypatch, kafka_username="defence-ops", kafka_password=SecretStr("not-a-real-pw"))
+    use(
+        monkeypatch,
+        kafka_sasl_username="defence-ops",
+        kafka_sasl_password=SecretStr("not-a-real-pw"),
+    )
     monkeypatch.setattr(main, "get_kafka_target", target)
     monkeypatch.setattr(main, "AIOKafkaConsumer", FakeConsumer)
 

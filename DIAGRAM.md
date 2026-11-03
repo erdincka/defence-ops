@@ -37,15 +37,15 @@ flowchart TD
         end
         subgraph inf_cluster ["Model serving"]
             litellm["<b>LiteLLM</b><br/><i>Model gateway, per-app key</i>"]
-            mlis["<b>MLIS</b><br/><i>Nemotron VL (vLLM)</i>"]
-            ollama["<b>Ollama</b><br/><i>Gemma, Qwen VL</i>"]
+            mlis["<b>MLIS / vLLM</b><br/><i>vision-language models</i>"]
+            ollama["<b>Other servers</b><br/><i>e.g. Ollama</i>"]
         end
         class litellm,mlis,ollama container;
     end
 
     %% 3. External Dependencies (Bottom)
-    subgraph external ["HPE Data Fabric"]
-        kafka_cluster["<b>Kafka API</b><br/>[Data Access Gateway]<br/><i>tactical-alerts stream</i>"]
+    subgraph external ["Kafka broker (e.g. HPE Data Fabric)"]
+        kafka_cluster["<b>Kafka API</b><br/>[e.g. Data Access Gateway]<br/><i>alerts topic</i>"]
     end
     class kafka_cluster outsider;
 
@@ -87,7 +87,7 @@ flowchart TD
 ### 📡 kafka-service
 - **Live alerts**: Streams the topic to the dashboard as Server-Sent Events at `/api/v1/kafka/stream`.
 - **Sample alerts**: `/api/v1/kafka/generate` writes 3–5 alerts about the feeds in the grid (each sample video has its own set; uploads are matched by file name), or general alerts when no feed is recognised.
-- **Credentials**: Connects as a Data Fabric user limited to the alerts stream; its password is a Kubernetes Secret.
+- **Credentials**: Connects as a user limited to the alerts topic; its credentials are a Kubernetes Secret, from the Helm values or created beforehand.
 
 ### 🎥 video-service
 - **Feeds**: Lists the sample videos and uploads, and serves them to the dashboard for playback.

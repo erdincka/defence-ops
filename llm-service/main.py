@@ -165,7 +165,7 @@ async def _visual_parts(
 def _thinking_params(enabled: bool, caps: ModelCapabilities) -> dict[str, Any]:
     """Request fields that switch the model's own reasoning on or off.
 
-    Tested through lonpcai's LiteLLM on 2026-11-02: reasoning_effort reaches Ollama (as its
+    Tested through a PCAI cluster's LiteLLM on 2026-11-02: reasoning_effort reaches Ollama (as its
     think switch) and vLLM; chat_template_kwargs reaches only vLLM (Nemotron VL), and Ollama
     ignores it. So "none" is what turns thinking off on Ollama's gemma4 and qwen3.8. Ollama's
     qwen3-vl thinks whatever is sent. Both go only to models whose LiteLLM model_info declares
@@ -239,7 +239,8 @@ async def chat(req: ChatRequest) -> dict[str, Any]:
     if not isinstance(model, str) or not model:
         raise HTTPException(
             status_code=400,
-            detail="No model selected. An administrator picks one on System Config.",
+            detail="No model selected. An administrator picks one on System Config, or sets "
+            "llm.model in the app's Helm values.",
         )
     try:
         caps = await client.capabilities(model)

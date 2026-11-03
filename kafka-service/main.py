@@ -33,7 +33,7 @@ class KafkaNotConfiguredError(Exception):
 
 
 async def get_kafka_target() -> tuple[str, str]:
-    """Reads the broker and topic saved on System Config.
+    """Reads the broker and topic: saved on System Config, else the chart's defaults.
 
     Raises:
         KafkaNotConfiguredError: Either is missing.
@@ -42,7 +42,8 @@ async def get_kafka_target() -> tuple[str, str]:
     broker, topic = config.get("kafka_broker"), config.get("kafka_topic")
     if not broker or not topic:
         raise KafkaNotConfiguredError(
-            "Kafka broker or topic not configured. An administrator sets them on System Config."
+            "Kafka broker or topic not configured. An administrator sets them on System Config, "
+            "or kafka.broker and kafka.topic in the app's Helm values."
         )
     return str(broker), str(topic)
 
@@ -58,15 +59,15 @@ def connection_kwargs(broker: str) -> dict[str, Any]:
         "security_protocol": settings.kafka_security_protocol,
     }
     if settings.kafka_security_protocol.startswith("SASL"):
-        if not settings.kafka_username or not settings.kafka_password:
+        if not settings.kafka_sasl_username or not settings.kafka_sasl_password:
             raise KafkaNotConfiguredError(
-                "No Kafka credentials: create Secret defence-ops-kafka (keys username and "
-                "password) in the app's namespace, then restart the pod."
+                "No Kafka credentials: set kafka.username and kafka.password, or "
+                "kafka.existingSecret, in the app's Helm values."
             )
         kwargs |= {
             "sasl_mechanism": settings.kafka_sasl_mechanism,
-            "sasl_plain_username": settings.kafka_username,
-            "sasl_plain_password": settings.kafka_password.get_secret_value(),
+            "sasl_plain_username": settings.kafka_sasl_username,
+            "sasl_plain_password": settings.kafka_sasl_password.get_secret_value(),
         }
     if settings.kafka_security_protocol.endswith("SSL"):
         kwargs["ssl_context"] = create_ssl_context(cafile=settings.kafka_ssl_cafile)

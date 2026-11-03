@@ -11,7 +11,7 @@ class LlmSettings(BaseSettings):
 
     Attributes:
         litellm_base_url: In-cluster LiteLLM proxy, without the /v1 suffix.
-        litellm_api_key: The app's LiteLLM virtual key, from Secret defence-ops-litellm.
+        litellm_api_key: The app's LiteLLM virtual key, from the chart's LiteLLM Secret.
         video_service_url: video-service in the same pod.
         request_timeout_seconds: Upper bound for one model call.
         models_cache_seconds: How long the LiteLLM model list is reused.

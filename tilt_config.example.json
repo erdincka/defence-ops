@@ -1,0 +1,13 @@
+{
+  "context": "my-pcai-cluster",
+  "registry": "registry.example.com/dev",
+  "endpoint": "defence-ops-dev.pcai.example.com",
+  "namespace": "dev",
+  "set": [
+    "llm.existingSecret.name=defence-ops-litellm",
+    "kafka.existingSecret.name=defence-ops-kafka",
+    "llm.model=my-vision-model",
+    "kafka.broker=kafka.example.com:9092",
+    "kafka.topic=tactical-alerts"
+  ]
+}

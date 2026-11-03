@@ -72,6 +72,13 @@ Environment shared by every container. Call with (dict "root" $ "service" .Value
   value: {{ .service.port | quote }}
 - name: CONFIG_PATH
   value: /app/data/config.json
+# Defaults until an administrator saves System Config
+- name: LLM_MODEL
+  value: {{ .root.Values.llm.model | quote }}
+- name: KAFKA_BROKER
+  value: {{ .root.Values.kafka.broker | quote }}
+- name: KAFKA_TOPIC
+  value: {{ .root.Values.kafka.topic | quote }}
 {{- with .root.Values.global.extraEnv }}
 {{ toYaml . }}
 {{- end }}
@@ -114,4 +121,50 @@ livenessProbe:
   periodSeconds: 20
   timeoutSeconds: 5
   failureThreshold: 3
+{{- end }}
+
+{{/*
+Image reference for one container. Call with (dict "root" $ "service" .Values.<service>); the
+service's own tag wins over global.image.tag.
+*/}}
+{{- define "defence-ops.image" -}}
+{{- printf "%s:%s" .service.image.repository (.service.image.tag | default .root.Values.global.image.tag) }}
+{{- end }}
+
+{{/*
+Secret holding the LiteLLM key: the one named in llm.existingSecret, else the chart's own when
+llm.apiKey is set, else none.
+*/}}
+{{- define "defence-ops.llmSecretName" -}}
+{{- if .Values.llm.existingSecret.name }}
+{{- .Values.llm.existingSecret.name }}
+{{- else if .Values.llm.apiKey }}
+{{- printf "%s-llm" (include "defence-ops.fullname" .) }}
+{{- end }}
+{{- end }}
+
+{{- define "defence-ops.llmSecretKey" -}}
+{{- if .Values.llm.existingSecret.name }}
+{{- .Values.llm.existingSecret.key | default "api-key" }}
+{{- else }}
+{{- "api-key" }}
+{{- end }}
+{{- end }}
+
+{{/*
+Secret holding the Kafka credentials (keys username and password), chosen the same way.
+*/}}
+{{- define "defence-ops.kafkaSecretName" -}}
+{{- if .Values.kafka.existingSecret.name }}
+{{- .Values.kafka.existingSecret.name }}
+{{- else if or .Values.kafka.username .Values.kafka.password }}
+{{- printf "%s-kafka-credentials" (include "defence-ops.fullname" .) }}
+{{- end }}
+{{- end }}
+
+{{/*
+PCAI's Keycloak issuer, which signs the ID tokens its sign-in forwards.
+*/}}
+{{- define "defence-ops.oidcIssuer" -}}
+{{- printf "https://keycloak.%s/realms/UA" .Values.ezua.domainName }}
 {{- end }}
