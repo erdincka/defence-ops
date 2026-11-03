@@ -1,4 +1,4 @@
-"""LLM Service: models from the in-cluster LiteLLM proxy and vision-language chat."""
+"""LLM Service: models from LiteLLM or another OpenAI-compatible endpoint, and VLM chat."""
 
 import logging
 import re
@@ -16,6 +16,7 @@ from common.demo_config import load_demo_config
 from common.feeds import VideoName
 from common.logging_config import setup_logging
 from litellm_client import (
+    AssumedCapabilities,
     LiteLLMClient,
     LiteLLMError,
     LiteLLMNotConfiguredError,
@@ -62,6 +63,11 @@ client = LiteLLMClient(
     settings.litellm_api_key.get_secret_value() if settings.litellm_api_key else None,
     settings.request_timeout_seconds,
     settings.models_cache_seconds,
+    assumed=AssumedCapabilities(
+        vision=settings.llm_supports_vision,
+        video=settings.llm_supports_video,
+        reasoning=settings.llm_supports_reasoning,
+    ),
 )
 
 
@@ -89,7 +95,7 @@ def _http_error(e: LiteLLMError | LiteLLMNotConfiguredError) -> HTTPException:
     if isinstance(e, LiteLLMNotConfiguredError):
         return HTTPException(status_code=503, detail=str(e))
     status = e.status_code if e.status_code in (400, 404, 422, 429, 504) else 502
-    return HTTPException(status_code=status, detail=f"LiteLLM: {e}")
+    return HTTPException(status_code=status, detail=f"Model endpoint: {e}")
 
 
 @app.get("/health")
@@ -100,10 +106,10 @@ async def health_check() -> dict[str, str]:
 
 @app.get("/api/v1/llm/models")
 async def list_models(refresh: bool = False) -> dict[str, Any]:
-    """Lists the models the app's LiteLLM key may use, and what each accepts.
+    """Lists the models the app's key may use on the model endpoint, and what each accepts.
 
     Args:
-        refresh: Re-read LiteLLM instead of the 60 s cache.
+        refresh: Re-read the endpoint instead of the 60 s cache.
 
     Returns:
         The models and the one selected on System Config.
@@ -168,8 +174,9 @@ def _thinking_params(enabled: bool, caps: ModelCapabilities) -> dict[str, Any]:
     Tested through a PCAI cluster's LiteLLM on 2026-11-02: reasoning_effort reaches Ollama (as its
     think switch) and vLLM; chat_template_kwargs reaches only vLLM (Nemotron VL), and Ollama
     ignores it. So "none" is what turns thinking off on Ollama's gemma4 and qwen3.8. Ollama's
-    qwen3-vl thinks whatever is sent. Both go only to models whose LiteLLM model_info declares
-    supports_reasoning.
+    qwen3-vl thinks whatever is sent. Sent straight to vLLM (an MLIS Nemotron VL deployment,
+    2026-11-03), the same fields switch thinking on and off. Both go only to models that support
+    reasoning, as LiteLLM's model_info or llm.capabilities.reasoning says.
     """
     if caps.reasoning is not True:
         return {}
@@ -208,7 +215,10 @@ def _split_reasoning(result: dict[str, Any]) -> tuple[str, str | None]:
     content: Any = message.get("content") or ""
     if isinstance(content, list):
         content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
-    reasoning_parts = [str(message.get("reasoning_content") or "").strip()]
+    # LiteLLM returns reasoning_content; vLLM, called directly, returns reasoning.
+    reasoning_parts = [
+        str(message.get("reasoning_content") or message.get("reasoning") or "").strip()
+    ]
 
     blocks = THINK_BLOCK.findall(content)
     if blocks:

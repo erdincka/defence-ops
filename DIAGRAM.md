@@ -58,6 +58,7 @@ flowchart TD
     
     %% Aligning lower components side-by-side
     llm_svc -- "Chat + imagery" --> litellm
+    llm_svc -. or directly .-> mlis
     litellm --> mlis
     litellm --> ollama
     llm_svc -- "Clip or frames<br/>[localhost]" --> video_svc
@@ -80,7 +81,7 @@ flowchart TD
 ### 🤖 llm-service
 - **Tactical Chat**: Combines the question, the feeds in context and the latest alerts into one request to the selected model.
 - **Prompts**: Puts fixed operating rules ahead of the operator's assistant instructions: use only the imagery and alerts supplied, separate observed from assessed with a confidence level, concise military register, British English and UTC times, no targeting details. It also tells the model which images, or which part of the clip, show which feed.
-- **Models**: Lists the models the app's LiteLLM key may use, with what each accepts (vision, video, thinking), as set in LiteLLM.
+- **Models**: Lists the models the app's key may use, with what each accepts (vision, video, thinking), as set in LiteLLM or, for a model served directly, in the chart's `llm.capabilities` values.
 - **Visual Context**: Sends video-capable models one short Motion-JPEG clip of the feeds, other vision models still frames, and falls back to frames if a model refuses video.
 - **Thinking**: Switches on the model's own reasoning when asked and supported, and returns it separately from the answer.
 
@@ -99,5 +100,5 @@ flowchart TD
 2.  **app-ui** sends the question, the assistant instructions, the feed names and the latest alerts (from **kafka-service**) to **llm-service**.
 3.  **llm-service** reads the selected model from the shared configuration and checks what it accepts.
 4.  **llm-service** asks **video-service** for a short clip (video models) or still frames per feed (other vision models).
-5.  **llm-service** calls the model through **LiteLLM** with the app's own key: the operating rules and instructions, the tasking, a note of which imagery shows which feed, and the alerts.
+5.  **llm-service** calls the model through **LiteLLM**, or the model's own endpoint, with the app's own key: the operating rules and instructions, the tasking, a note of which imagery shows which feed, and the alerts.
 6.  The answer, with the model's reasoning if thinking was on, appears in the dashboard.

@@ -8,7 +8,7 @@ import { settingsAccess } from "@/lib/auth";
 // the build from tracing the whole project because of these dynamic paths.
 const CONFIG_PATH = process.env.CONFIG_PATH || "/app/data/config.json";
 
-// System Config holds no secrets: the LiteLLM key and the Kafka credentials are Kubernetes
+// System Config holds no secrets: the model endpoint key and the Kafka credentials are Kubernetes
 // Secrets that only llm-service and kafka-service read. Saving rewrites demo_services with
 // these fields alone, which also drops the keys older versions stored here.
 const demoServicesSchema = z.object({

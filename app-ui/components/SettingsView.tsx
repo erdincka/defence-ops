@@ -15,7 +15,9 @@ const EMPTY: DemoConfig = { llm_model: "", kafka_broker: "", kafka_topic: "" };
 function Capability({ label, value, icon }: { label: string; value: boolean | null; icon: React.ReactNode }) {
   const state = value === true ? "yes" : value === false ? "no" : "unknown";
   const title =
-    value === null ? `LiteLLM does not declare ${label.toLowerCase()} support for this model` : undefined;
+    value === null
+      ? `The model endpoint does not declare ${label.toLowerCase()} support for this model. Set llm.capabilities in the app's Helm values.`
+      : undefined;
   return (
     <span className={`capability ${state}`} title={title}>
       {icon} {label}: {state === "yes" ? "Yes" : state === "no" ? "No" : "Unknown"}
@@ -44,7 +46,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
         })
         .catch((err: unknown) => {
           setModels([]);
-          setModelsError(err instanceof Error ? err.message : "Could not load models from LiteLLM.");
+          setModelsError(err instanceof Error ? err.message : "Could not load models from the model endpoint.");
         })
         .finally(() => setIsLoadingModels(false)),
     [],
@@ -118,7 +120,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                 <div className="field-label">
                   <label htmlFor="llm-model">Model</label>
                   <p className="field-hint">
-                    Models this app&apos;s key may use on LiteLLM. Pick one that accepts images.
+                    Models this app&apos;s key may use on the model endpoint. Pick one that accepts images.
                   </p>
                 </div>
                 <div className="field-value">
@@ -153,7 +155,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                   )}
                   <button type="button" onClick={refreshModels} className="icon-btn">
                     <RefreshCw size={12} className={isLoadingModels ? "spin" : ""} />
-                    Refresh from LiteLLM
+                    Refresh models
                   </button>
                   <p className="helper-text">
                     Video-capable models get a short clip of the feeds, other vision models get still frames.
