@@ -490,3 +490,24 @@
   border-radius: 0 4px 4px 0;
   color: #94a3b8;
 }
+
+.thinkSegment summary {
+  cursor: pointer;
+  font-style: normal;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.thinkingDisabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.thinkingDisabled input {
+  cursor: not-allowed;
+}
+
+.notice {
+  font-size: 0.85em;
+  color: #f59e0b;
+  margin-top: 8px;
+}

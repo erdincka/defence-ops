@@ -26,7 +26,7 @@ flowchart TD
             istio["&nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; <b>Gateway</b> &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;<br/><i>Routes traffic to services</i>"]
         end
         class istio container;
-        subgraph ns ["Namespace"]
+        subgraph ns ["One pod"]
 
             app_ui_svc["<b>app-ui</b><br/><i>Config Provider</i>"]
             llm_svc["<b>llm-service</b><br/><i>VLM Orchestration</i>"]
@@ -36,9 +36,10 @@ flowchart TD
             
         end
         subgraph inf_cluster ["Inference Services [MLIS]"]
+            litellm["<b>LiteLLM</b><br/><i>Model gateway, per-app key</i>"]
             mlis["<b>MLIS</b><br/><i>Local VLM / NVIDIA Triton</i>"]
         end
-        class mlis container;
+        class litellm,mlis container;
     end
 
     %% 3. External Dependencies (Bottom)
@@ -55,9 +56,10 @@ flowchart TD
     istio -- "Routes /video" --> video_svc
     
     %% Aligning lower components side-by-side
-    llm_svc -- "VLM Inference" --> mlis
-    video_svc -- "Sync Assets" --> app_ui_svc
-    kafka_svc -- "Pub/Sub<br/>[SASL_SSL]" --> kafka_cluster
+    llm_svc -- "VLM Inference" --> litellm
+    litellm --> mlis
+    llm_svc -- "Clip or frames<br/>[localhost]" --> video_svc
+    kafka_svc -- "Pub/Sub<br/>[SASL]" --> kafka_cluster
     
     %% --- Custom Standout Styling ---
     style pcai fill:none,stroke:#01a982,stroke-width:4px,color:#01a982
@@ -70,13 +72,14 @@ flowchart TD
 
 ### 🖥️ app-ui
 - **Frontend**: A Next.js-powered dashboard providing a "Global Tactical Operations Room" experience.
-- **Admin Configuration**: Manages demo settings (LLM endpoints, Kafka credentials) via `/api/v1/admin/demo-config`.
-- **Persistence**: Saves and loads system configuration from a shared JSON file on a Persistent Volume.
+- **Admin Configuration**: Manages demo settings (model, Kafka broker and topic) via `/api/v1/admin/demo-config`. Only PCAI administrators can change them; the app verifies their Keycloak sign-in token.
+- **Persistence**: Saves and loads system configuration from a shared JSON file on a Persistent Volume. It holds no secrets.
 
 ### 🤖 llm-service
-- **Tactical Chat**: Handles user queries and merges them with Kafka tactical context or image/video frames.
-- **Model Discovery**: Automatically discovers available `InferenceServices` in the cluster or validates external OpenAI-compatible providers.
-- **Inference Integration**: Orchestrates calls to modern LLMs (e.g., Qwen, DeepSeek, Llama) for tactical analysis.
+- **Tactical Chat**: Handles user queries and merges them with Kafka tactical context and the selected feeds.
+- **Models**: Lists the models the app's LiteLLM key may use, with what each accepts (vision, video, thinking).
+- **Visual Context**: Sends video-capable models one short clip of the feeds, other vision models still frames, and falls back to frames if a model refuses video.
+- **Thinking**: Switches on the model's own reasoning when asked and supported, and returns it separately from the answer.
 
 ### 📡 kafka-service
 - **SSE Streaming**: Provides a Server-Sent Events (SSE) endpoint at `/api/v1/kafka/stream` for real-time dashboard updates.
@@ -90,8 +93,8 @@ flowchart TD
 ## Request Flow Example: Tactical Analysis
 
 1.  **User** asks a question in the chat about "Tactical 1" feed.
-2.  **app-ui** requests the latest frames for "Tactical 1" from **video-service**.
-3.  **app-ui** sends the prompt + frames + recent alerts (from **kafka-service**) to **llm-service**.
-4.  **llm-service** consults its configuration (fetched from **app-ui** via the internal API).
-5.  **llm-service** calls the configured **Inference Endpoint** (e.g., a KServe deployment).
-6.  The result is returned to the user via the dashboard.
+2.  **app-ui** sends the prompt, the feed names and recent alerts (from **kafka-service**) to **llm-service**.
+3.  **llm-service** reads the selected model from the shared configuration and checks what it accepts.
+4.  **llm-service** asks **video-service** for a short clip (video models) or still frames (other vision models).
+5.  **llm-service** calls the model through **LiteLLM** with the app's own key.
+6.  The answer, and the model's reasoning if thinking was on, is returned to the user via the dashboard.

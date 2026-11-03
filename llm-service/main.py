@@ -1,410 +1,284 @@
-"""LLM Service for handling chat and model discovery."""
+"""LLM Service: models from the in-cluster LiteLLM proxy and vision-language chat."""
 
 import logging
-import os
+import re
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional
+from dataclasses import asdict
+from typing import Annotated, Any, Literal
 
-import httpx
 import structlog
-from fastapi import Body, Depends, FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field, StringConstraints
 
-from common.config import get_settings
 from common.demo_config import load_demo_config
 from common.logging_config import setup_logging
-from common.schemas import APIResponse, InferenceServiceInfo, ModelListResponse
-from model_registry import ModelRegistry
+from litellm_client import (
+    LiteLLMClient,
+    LiteLLMError,
+    LiteLLMNotConfiguredError,
+    ModelCapabilities,
+)
+from media import MediaError, fetch_clip, fetch_frames
+from settings import get_settings
 
-# Configure structured logging
 setup_logging("llm-service")
 logger = structlog.get_logger(__name__)
 settings = get_settings()
 
+ContextMode = Literal["video", "frames", "none"]
+# Names as /api/v1/video/list returns them: no paths.
+VideoName = Annotated[str, StringConstraints(pattern=r"^\w[\w .-]*\.(mp4|mov)$", max_length=200)]
+THINK_BLOCK = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+# Statuses that mean the clip itself was refused, so frames are worth a retry: the model says so
+# (vLLM: 400), or LiteLLM does (its token counter fails on video_url parts for Ollama models with a
+# 500, seen 2026-11-02). Auth, budget, rate, unreachable and timeout errors are not retried.
+VIDEO_REFUSED = frozenset({400, 413, 415, 422, 500})
 
-# Suppress successful uvicorn access logs for health checks
+
 class HealthCheckFilter(logging.Filter):
-    """Filter to suppress health check logs."""
+    """Drops access-log lines for successful health checks."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        """Filters out logs containing health check paths with 200 status.
-        
-        Args:
-            record: The log record.
-            
-        Returns:
-            True if the log should be kept, False otherwise.
-        """
+        """Keeps every record except a 200 on /health."""
         msg = record.getMessage()
         return not ("/health" in msg and " 200" in msg)
 
 
-logging.getLogger("uvicorn.access").addFilter(HealthCheckFilter())
-logging.getLogger("uvicorn").addFilter(HealthCheckFilter())
-
-
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Lifecycle manager for the FastAPI application.
-    
-    Args:
-        app: The FastAPI application instance.
-    """
-    for logger_name in ["uvicorn", "uvicorn.access", "uvicorn.error"]:
-        for f in logging.getLogger(logger_name).filters:
-            if isinstance(f, HealthCheckFilter):
-                break
-        else:
-            logging.getLogger(logger_name).addFilter(HealthCheckFilter())
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Installs the health-check filter once uvicorn's loggers exist."""
+    for name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
+        log = logging.getLogger(name)
+        if not any(isinstance(f, HealthCheckFilter) for f in log.filters):
+            log.addFilter(HealthCheckFilter())
     yield
 
 
 app = FastAPI(title="LLM Service", lifespan=lifespan)
-registry = ModelRegistry()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+client = LiteLLMClient(
+    settings.litellm_base_url,
+    settings.litellm_api_key.get_secret_value() if settings.litellm_api_key else None,
+    settings.request_timeout_seconds,
+    settings.models_cache_seconds,
 )
 
 
+class Alert(BaseModel):
+    """One tactical alert from the Kafka ticker."""
+
+    severity: str = Field(default="INFO", max_length=20)
+    location: str | None = Field(default=None, max_length=200)
+    message: str = Field(default="", max_length=2000)
+
+
 class ChatRequest(BaseModel):
-    """Request schema for the chat endpoint."""
+    """A question about the selected feeds.
 
-    system_prompt: Optional[str] = "You are a helpful AI assistant."
-    message: str
-    image_b64: Optional[str] = None
-    images: Optional[List[str]] = None
-    video_b64: Optional[str] = None
-    kafka_context: Optional[List[Dict[str, Any]]] = None
-    model: Optional[str] = None
-    temperature: Optional[float] = 0.7
-    enable_thinking: Optional[bool] = False
-
-
-async def get_llm_config() -> Dict[str, Any]:
-    """Reads the LLM settings saved by the app-ui.
-
-    Returns:
-        A dictionary containing the LLM configuration.
+    Attributes:
+        message: The question.
+        system_prompt: The assistant instructions from the dashboard.
+        videos: Feeds to show the model; empty for a text-only question.
+        kafka_context: Recent alerts to include.
+        enable_thinking: Ask for the model's own reasoning, when it supports it.
+        temperature: Sampling temperature.
     """
-    return await load_demo_config()
+
+    message: str = Field(min_length=1, max_length=4000)
+    system_prompt: str | None = Field(default=None, max_length=4000)
+    videos: list[VideoName] = Field(default_factory=list, max_length=4)
+    kafka_context: list[Alert] = Field(default_factory=list, max_length=50)
+    enable_thinking: bool = False
+    temperature: float = Field(default=0.7, ge=0, le=2)
+
+
+def _http_error(e: LiteLLMError | LiteLLMNotConfiguredError) -> HTTPException:
+    if isinstance(e, LiteLLMNotConfiguredError):
+        return HTTPException(status_code=503, detail=str(e))
+    status = e.status_code if e.status_code in (400, 404, 422, 429, 504) else 502
+    return HTTPException(status_code=status, detail=f"LiteLLM: {e}")
 
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint.
-    
-    Returns:
-        A dictionary indicating the health status.
-    """
+async def health_check() -> dict[str, str]:
+    """Health check endpoint."""
     return {"status": "healthy"}
 
 
-# --- Model Registry Endpoints ---
+@app.get("/api/v1/llm/models")
+async def list_models(refresh: bool = False) -> dict[str, Any]:
+    """Lists the models the app's LiteLLM key may use, and what each accepts.
 
-
-@app.get("/api/v1/models", response_model=ModelListResponse)
-async def list_models(model_type: Optional[str] = None):
-    """Lists all available inference models or filters by type.
-    
     Args:
-        model_type: Optional type filter (e.g., vlm, llm).
-        
+        refresh: Re-read LiteLLM instead of the 60 s cache.
+
     Returns:
-        A list of models and total count.
+        The models and the one selected on System Config.
     """
-    if model_type:
-        models = registry.get_models_by_type(model_type)
-    else:
-        models = registry.list_inference_services()
-
-    return ModelListResponse(models=models, total=len(models))
-
-
-@app.get("/api/v1/llm/discovered-endpoints")
-async def list_inference_service_endpoints():
-    """Lists endpoints of all ready InferenceServices.
-    
-    Returns:
-        A dictionary with status and list of endpoints.
-    """
-    isvcs = registry.list_inference_services()
-    endpoints = []
-    for svc in isvcs:
-        if svc.status == "ready" and svc.url:
-            endpoints.append({"name": svc.name, "url": svc.url, "type": svc.type})
-    return {"status": "success", "endpoints": endpoints}
-
-
-@app.post("/api/v1/llm/discover-models")
-async def discover_external_models(
-    endpoint: str = Body(..., embed=True), api_key: Optional[str] = Body(None, embed=True)
-):
-    """Validates the endpoint by checking if ENDPOINT/v1/models responds.
-    
-    Args:
-        endpoint: The base URL of the inference endpoint.
-        api_key: Optional API key for authorization.
-        
-    Returns:
-        A dictionary with status and discovered models.
-    """
-    # Canonical check: ENDPOINT + /v1/models
-    models_url = f"{endpoint.rstrip('/')}/v1/models"
-    logger.info("discovering_models", url=models_url)
-
-    # The UI never holds the stored key, so a blank key means "use the saved one" - but only for
-    # the saved endpoint, so that a typed-in URL cannot be used to send the key elsewhere.
-    if not api_key:
-        config = await get_llm_config()
-        if (config.get("llm_endpoint") or "").rstrip("/") == endpoint.rstrip("/"):
-            api_key = config.get("llm_api_key")
-
-    headers = {}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
     try:
-        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
-            resp = await client.get(models_url, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
-
-            # Standard OpenAI response format has a 'data' field containing models
-            models = []
-            if isinstance(data, dict) and "data" in data:
-                models = [m.get("id") for m in data["data"] if isinstance(m, dict) and m.get("id")]
-            elif isinstance(data, dict) and "models" in data:
-                models = [m.get("name", m.get("id")) for m in data["models"] if isinstance(m, dict)]
-            elif isinstance(data, list):
-                models = data
-
-            logger.info("discovery_success", url=models_url, count=len(models))
-            return {"status": "success", "models": models}
-    except Exception as e:
-        logger.error("model_discovery_failed", url=models_url, error=str(e))
-        error_msg = str(e)
-        if "timeout" in error_msg.lower():
-            error_msg = "Request timed out. The server might be slow or unreachable."
-        elif "status 404" in error_msg.lower():
-            error_msg = (
-                f"Endpoint {models_url} returned 404. "
-                "Make sure this is a valid OpenAI-compatible provider."
-            )
-        elif "status 401" in error_msg.lower():
-            error_msg = "Unauthorized. Please check your API key if required by this provider."
-
-        return {
-            "status": "error",
-            "message": f"Discovery failed on {models_url}: {error_msg}",
-            "models": [],
-        }
+        models = await client.list_models(refresh=refresh)
+    except (LiteLLMError, LiteLLMNotConfiguredError) as e:
+        raise _http_error(e) from e
+    selected = (await load_demo_config()).get("llm_model") or None
+    return {
+        "status": "success",
+        "data": {"models": [asdict(m) for m in models], "selected": selected},
+    }
 
 
-@app.get("/api/v1/models/{model_name}", response_model=InferenceServiceInfo)
-async def get_model(model_name: str):
-    """Gets detailed information about a specific model.
-    
-    Args:
-        model_name: The name of the model.
-        
-    Returns:
-        Model information.
-        
-    Raises:
-        HTTPException: If model is not found.
+def _initial_mode(caps: ModelCapabilities, notices: list[str]) -> ContextMode:
+    if caps.video is True:
+        return "video"
+    if caps.vision is False:
+        notices.append(
+            f"{caps.id} does not accept images, so it answered from the text and alerts only."
+        )
+        return "none"
+    return "frames"
+
+
+async def _visual_parts(
+    videos: list[str], mode: ContextMode, notices: list[str]
+) -> tuple[list[dict[str, Any]], ContextMode]:
+    if mode == "video":
+        try:
+            clip = await fetch_clip(settings.video_service_url, videos)
+            return [{"type": "video_url", "video_url": {"url": clip}}], "video"
+        except MediaError as e:
+            logger.warning("video_clip_failed", error=str(e))
+            notices.append("The video clip could not be built, so still frames were sent instead.")
+            mode = "frames"
+    if mode == "frames":
+        try:
+            frames = await fetch_frames(settings.video_service_url, videos, settings.max_images)
+            return [{"type": "image_url", "image_url": {"url": f}} for f in frames], "frames"
+        except MediaError as e:
+            logger.warning("frame_capture_failed", error=str(e))
+            notices.append("Frames could not be captured, so the model answered from text only.")
+    return [], "none"
+
+
+def _thinking_params(enabled: bool, caps: ModelCapabilities) -> dict[str, Any]:
+    """Request fields that switch the model's own reasoning on or off.
+
+    Tested through lonpcai's LiteLLM on 2026-11-02: reasoning_effort reaches Ollama (as its
+    think switch) and vLLM; chat_template_kwargs reaches only vLLM (Nemotron VL), and Ollama
+    ignores it. So "none" is what turns thinking off on Ollama's gemma4 and qwen3.8. Ollama's
+    qwen3-vl thinks whatever is sent. Both go only to models whose LiteLLM model_info declares
+    supports_reasoning.
     """
-    model = registry.get_model_by_name(model_name)
-    if not model:
-        raise HTTPException(status_code=404, detail=f"Model {model_name} not found")
+    if caps.reasoning is not True:
+        return {}
+    if enabled:
+        return {"reasoning_effort": "medium", "chat_template_kwargs": {"enable_thinking": True}}
+    return {"reasoning_effort": "none", "chat_template_kwargs": {"enable_thinking": False}}
 
-    return model
+
+def _payload(
+    req: ChatRequest, caps: ModelCapabilities, parts: list[dict[str, Any]], thinking: bool
+) -> dict[str, Any]:
+    text = req.message
+    if req.kafka_context:
+        alerts = "\n".join(
+            f"[{a.severity}] {a.location + ': ' if a.location else ''}{a.message}"
+            for a in req.kafka_context[-20:]
+        )
+        text = f"QUERY: {req.message}\n\nLATEST TACTICAL DATA (KAFKA):\n{alerts}"
+    content: str | list[dict[str, Any]] = (
+        [{"type": "text", "text": text}, *parts] if parts else text
+    )
+    messages: list[dict[str, Any]] = []
+    if req.system_prompt:
+        messages.append({"role": "system", "content": req.system_prompt})
+    messages.append({"role": "user", "content": content})
+    return {
+        "model": caps.id,
+        "messages": messages,
+        "temperature": req.temperature,
+        **_thinking_params(thinking, caps),
+    }
 
 
-# --- Chat Endpoint ---
+def _split_reasoning(result: dict[str, Any]) -> tuple[str, str | None]:
+    """Separates the answer from the model's reasoning, wherever the model put it."""
+    choices = result.get("choices") or [{}]
+    message = choices[0].get("message") or {}
+    content: Any = message.get("content") or ""
+    if isinstance(content, list):
+        content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
+    reasoning_parts = [str(message.get("reasoning_content") or "").strip()]
+
+    blocks = THINK_BLOCK.findall(content)
+    if blocks:
+        reasoning_parts += [b.strip() for b in blocks]
+        content = THINK_BLOCK.sub("", content)
+    elif "</think>" in content:
+        # Templates that open <think> in the prompt return only the closing tag.
+        head, _, content = content.partition("</think>")
+        reasoning_parts.append(head.strip())
+
+    reasoning = "\n\n".join(p for p in reasoning_parts if p)
+    return str(content).strip(), reasoning or None
 
 
 @app.post("/api/v1/llm/chat")
-async def chat(req: ChatRequest):
-    """Generic endpoint to send a prompt (and optional base64 images) to a remote LLM.
-    
-    Args:
-        req: The chat request object.
-        
+async def chat(req: ChatRequest) -> dict[str, Any]:
+    """Answers a question about the selected feeds with the model chosen on System Config.
+
+    Video-capable models get one clip of all the feeds; image models get still frames;
+    others get text only. Thinking mode is used only when the model supports it, and every
+    such decision is returned as a notice. One frame to the 120B Nemotron VL took 4.3 s
+    (2026-11-02); a clip adds about 1 s per feed to build, and thinking adds model time.
+
     Returns:
-        The LLM response.
-        
-    Raises:
-        HTTPException: If LLM is not configured or request fails.
+        The reply, the reasoning if any, the model, how the feeds were sent, and notices.
     """
-    logger.info("llm_chat_request_received", message_len=len(req.message))
-
-    config = await get_llm_config()
-
-    raw_endpoint = config.get("llm_endpoint")
-    api_key = config.get("llm_api_key")
-
-    if not raw_endpoint:
-        logger.error("llm_not_configured", config_keys=list(config.keys()))
+    model = (await load_demo_config()).get("llm_model")
+    if not isinstance(model, str) or not model:
         raise HTTPException(
             status_code=400,
-            detail="LLM Endpoint is not configured. Please set it in Advanced Demo Settings.",
+            detail="No model selected. An administrator picks one on System Config.",
         )
-
-    # Normalize endpoint for chat: if it's just base, append /v1/chat/completions
-    endpoint = raw_endpoint.rstrip("/")
-    if "/chat/completions" not in endpoint:
-        if "/v1" not in endpoint:
-            endpoint = f"{endpoint}/v1/chat/completions"
-        else:
-            endpoint = f"{endpoint}/chat/completions"
-
-    logger.info("llm_using_endpoint", original=raw_endpoint, final=endpoint)
-
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    # Constructing an OpenAI compatible message structure
-    user_content = []
-
-    # Process Kafka context if present
-    full_message = req.message
-    if req.kafka_context:
-        logs_text = "\n".join(
-            [
-                f"[{l.get('severity', 'INFO')}] {l.get('message', '')}"
-                for l in req.kafka_context[-20:]
-            ]
-        )
-        full_message = f"QUERY: {req.message}\n\nLATEST TACTICAL DATA (KAFKA):\n{logs_text}"
-
-    user_content.append({"type": "text", "text": full_message})
-
-    # Individual legacy image
-    if req.image_b64:
-        user_content.append({"type": "image_url", "image_url": {"url": req.image_b64}})
-
-    # Multiple new images list
-    if req.images:
-        for img in req.images[:5]:  # Safety limit to 5 images as requested
-            user_content.append({"type": "image_url", "image_url": {"url": img}})
-
-    # Video context handling
-    provider = config.get("llm_provider", "ollama")
-    if req.video_b64:
-        if provider == "openai":
-            user_content.append({"type": "video_url", "video_url": {"url": req.video_b64}})
-            logger.info("submitting_video_url", provider=provider)
-        else:
-            # For Ollama, the frontend should have already converted video to images.
-            # We log this just in case of inconsistent state.
-            logger.info(
-                "skipping_video_url_for_ollama", msg="Ollama provider does not support video_url"
-            )
-
-    messages = []
-    if req.system_prompt:
-        messages.append({"role": "system", "content": req.system_prompt})
-
-    # Decide if we send content as a string (more compatible) or list (multi-modal)
-    final_content = user_content
-    if len(user_content) == 1 and user_content[0]["type"] == "text":
-        final_content = user_content[0]["text"]
-
-    if req.enable_thinking:
-        # Provide clear instructions to the model
-        # to ensure it actually uses the <think> tags in its output.
-        thinking_prompt = (
-            "\n\n[INSTRUCTION]: Please provide your internal reasoning process first, "
-            "wrapped in <think> and </think> tags, before providing your final response."
-        )
-        if isinstance(final_content, str):
-            final_content += thinking_prompt
-        elif isinstance(final_content, list):
-            # Append to the first text block or add a new one
-            for item in final_content:
-                if item.get("type") == "text":
-                    item["text"] += thinking_prompt
-                    break
-            else:
-                final_content.append({"type": "text", "text": thinking_prompt})
-
-    messages.append({"role": "user", "content": final_content})
-
-    # Determine which model to use
-    selected_model = req.model
-    if not selected_model or selected_model == "default":
-        selected_model = config.get("llm_model")
-
-    if not selected_model:
-        # Final fallback if nothing is configured
-        selected_model = "default"
-
-    payload = {"model": selected_model, "messages": messages, "temperature": req.temperature}
-
-    logger.info("llm_request_started", endpoint=endpoint)
     try:
-        async with httpx.AsyncClient(timeout=600.0, verify=False) as client:
-            resp = await client.post(endpoint, headers=headers, json=payload)
-            resp.raise_for_status()
-            result = resp.json()
+        caps = await client.capabilities(model)
+    except (LiteLLMError, LiteLLMNotConfiguredError) as e:
+        raise _http_error(e) from e
 
-            # Simple fallback parser for common LLM API formats (OpenAI format)
-            reply_text = ""
-            reasoning = ""
-            
-            if "choices" in result and len(result["choices"]) > 0:
-                choice = result["choices"][0]
-                if "message" in choice:
-                    msg = choice["message"]
-                    reply_text = msg.get("content", "")
-                    # Capture reasoning_content (common in DeepSeek and some OpenAI-compatible providers)
-                    reasoning = msg.get("reasoning_content", "")
-                elif "text" in choice:
-                    reply_text = choice["text"]
-            else:
-                reply_text = str(result)
+    notices: list[str] = []
+    thinking = req.enable_thinking and caps.reasoning is True
+    if req.enable_thinking and not thinking:
+        notices.append(f"{model} does not support thinking mode, so it answered without it.")
 
-            # If the model provided explicit reasoning content but not in the main text,
-            # prepend it wrapped in <think> tags.
-            if reasoning and "<think>" not in reply_text:
-                reply_text = f"<think>\n{reasoning}\n</think>\n\n{reply_text}"
+    mode: ContextMode = _initial_mode(caps, notices) if req.videos else "none"
+    parts, mode = await _visual_parts(req.videos, mode, notices)
+    logger.info("llm_chat", model=model, context=mode, feeds=len(req.videos), thinking=thinking)
 
-            return {"status": "success", "data": {"reply": reply_text, "raw": result}}
+    try:
+        result = await client.chat(_payload(req, caps, parts, thinking))
+    except LiteLLMNotConfiguredError as e:
+        raise _http_error(e) from e
+    except LiteLLMError as e:
+        if mode != "video" or e.status_code not in VIDEO_REFUSED:
+            logger.error("llm_chat_failed", model=model, status_code=e.status_code, error=str(e))
+            raise _http_error(e) from e
+        logger.warning("video_refused", model=model, status_code=e.status_code, error=str(e))
+        client.mark_video_refused(model)
+        notices.append(f"{model} refused the video clip, so still frames were sent instead.")
+        parts, mode = await _visual_parts(req.videos, "frames", notices)
+        try:
+            result = await client.chat(_payload(req, caps, parts, thinking))
+        except LiteLLMError as retry_error:
+            raise _http_error(retry_error) from retry_error
 
-    except httpx.TimeoutException as e:
-        logger.error("llm_timeout_error", error=str(e), endpoint=endpoint)
-        raise HTTPException(
-            status_code=504,
-            detail=(
-                f"LLM Request Timeout: {str(e)}. "
-                "The model may be slow to respond or still loading. "
-                "Please try again in few moments."
-            ),
-        )
-    except httpx.HTTPStatusError as e:
-        logger.error("llm_http_error", status_code=e.response.status_code, response=e.response.text)
-        raise HTTPException(
-            status_code=e.response.status_code, detail=f"LLM Error: {e.response.text}"
-        )
-    except Exception as e:
-        logger.error("llm_request_failed", error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to communicate with LLM: {str(e)}")
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
-        reload=True if os.environ.get("ENV") == "development" else False,
-    )
-
+    reply, reasoning = _split_reasoning(result)
+    return {
+        "status": "success",
+        "data": {
+            "reply": reply,
+            "reasoning": reasoning,
+            "model": model,
+            "context": mode,
+            "thinking": thinking,
+            "notices": notices,
+        },
+    }

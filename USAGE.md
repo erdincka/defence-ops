@@ -6,17 +6,13 @@ This guide provides a step-by-step walkthrough for demonstrating the **Defence-O
 
 Before starting the demo, you must configure the AI and Data Fabric settings. This only needs to be done once or when you need to switch models/clusters.
 
-1.  **Open Settings**: Click the **System Config** (gear icon) in the navigation bar.
-2.  **LLM Endpoint Configuration**:
-    *   **API Format**: Ensure **OpenAI compatible** is selected (this is the default and recommended for HPE PCAI).
-    *   **Endpoint URL**: Select a discovered endpoint from the dropdown or manually enter your Model Endpoint URL from AI Essentials.
-    *   **Model Selection**: Choose your VLM (e.g., `nemotron-nano-12b-v2-vl` or `qwen3-vl:8b`).
-    *   **API Token**: Enter your API Key/Token found in AI Essentials.
+1.  **Open Settings**: Click the **System Config** (gear icon) in the navigation bar. Only PCAI administrators can change these settings; everyone else sees them read-only, with the reason.
+2.  **Model**: Pick a model from the list of models this app's key may use on the in-cluster LiteLLM. Badges show whether it takes **Vision**, **Video** and **Thinking**; choose one with Vision.
+    *   Models with Video receive a short clip of the selected feeds; other vision models receive still frames.
+    *   The chat's **Thinking** toggle is available only for models with Thinking.
 3.  **Data Fabric (Optional)**:
-    *   If you want to stream real-time telemetry, enter your **Kafka Broker Details**:
-        *   **URI**: `broker-host:port`
-        *   **Username**: Your Data Fabric username.
-        *   **Password**: Your Data Fabric password.
+    *   To stream real-time telemetry, enter the **Broker** (`broker-host:port`) and the **Topic**.
+    *   The credentials are a Kubernetes Secret the cluster administrator sets up; they are not entered here.
 4.  **Save**: Click "Save Configuration" to apply the settings.
 
 ---

@@ -14,7 +14,8 @@ const Mermaid = ({ content }: { content: string }) => {
     useEffect(() => {
         if (ref.current) {
             mermaid.initialize({
-                startOnLoad: true,
+                startOnLoad: false,
+                securityLevel: 'strict',
                 theme: 'dark',
                 themeVariables: {
                     primaryColor: '#0070F8',
@@ -31,12 +32,11 @@ const Mermaid = ({ content }: { content: string }) => {
                     clusterBorder: '#7D8A92'
                 }
             });
-            mermaid.contentLoaded();
-            
+
             // Re-render when content changes
             const renderDiagram = async () => {
                 try {
-                    const { svg } = await mermaid.render(`mermaid-${Math.random().toString(36).substr(2, 9)}`, content);
+                    const { svg } = await mermaid.render(`mermaid-${Math.random().toString(36).slice(2, 11)}`, content);
                     if (ref.current) {
                         ref.current.innerHTML = svg;
                     }
