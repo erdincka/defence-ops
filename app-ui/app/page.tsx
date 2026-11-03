@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 import { api, type Alert, type LlmModel } from "@/lib/api";
 import styles from "./ops-center.module.css";
 import SettingsView from "@/components/SettingsView";
+import { useStickToBottom } from "@/lib/useStickToBottom";
 import DocsModal from "@/components/DocsModal";
 
 // Helper to resolve dynamic service URLs
@@ -37,6 +38,17 @@ const DEFAULT_SYSTEM_PROMPT =
 const LEGACY_SYSTEM_PROMPT =
   "You are an advanced military AI assisting a Command & Control centre. Analyse visuals objectively and provide concise tactical assessments.";
 const SYSTEM_PROMPT_KEY = "ops_system_prompt";
+
+// Ready-made questions under the chat box: a click puts one in the box to send or edit.
+const SAMPLE_QUESTIONS: { label: string; text: string }[] = [
+  { label: "SITREP", text: "Give me a SITREP across the active feeds and the latest alerts." },
+  { label: "Confirm alerts", text: "Which alerts can you confirm from the imagery, and which can you not?" },
+  { label: "Count vehicles", text: "How many military vehicles can you see in each feed?" },
+  { label: "Force strength", text: "Give your best estimate of the strength of the observed forces." },
+  { label: "Likely intent", text: "What is the likely intent of the observed forces?" },
+  { label: "Priorities", text: "Which threat needs action first, and what do you recommend?" },
+  { label: "Next ISR", text: "What should the next ISR collection confirm?" },
+];
 
 // Feed names as operators see them; llm-service and kafka-service use the same rule (common/feeds.py).
 const formatFileName = (name: string) => {
@@ -75,8 +87,8 @@ export default function OpsCenter() {
   const [logs, setLogs] = useState<Alert[]>([]);
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [isKafkaConfigured, setIsKafkaConfigured] = useState<boolean | null>(null);
-  const logsEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const savedPrompt = localStorage.getItem(SYSTEM_PROMPT_KEY);
@@ -92,10 +104,15 @@ export default function OpsCenter() {
     else localStorage.setItem(SYSTEM_PROMPT_KEY, systemPrompt);
   }, [systemPrompt]);
 
-  useEffect(() => {
-    // Scroll logs
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
+  const alertFeedRef = useRef<HTMLDivElement>(null);
+  const chatFeedRef = useRef<HTMLDivElement>(null);
+  const onAlertFeedScroll = useStickToBottom(alertFeedRef, logs);
+  const onChatFeedScroll = useStickToBottom(chatFeedRef, `${chatMessages.length}:${isSending}`);
+
+  const pickSampleQuestion = (text: string) => {
+    setChatInput(text);
+    chatInputRef.current?.focus();
+  };
 
   const applyVideos = useCallback((vids: VideoSource[]) => {
     setVideos(vids);
@@ -435,7 +452,7 @@ export default function OpsCenter() {
                            <Zap size={10} /> Generate Alerts
                         </button>
                      </div>
-                    <div className={styles.terminalFeed}>
+                    <div className={styles.terminalFeed} ref={alertFeedRef} onScroll={onAlertFeedScroll}>
                        {logs.length === 0 ? (
                          <span className={styles.emptyLog}>No alerts received... Waiting for datalink...</span>
                        ) : (
@@ -448,7 +465,6 @@ export default function OpsCenter() {
                            </div>
                          ))
                        )}
-                       <div ref={logsEndRef} />
                     </div>
                 </div>
               )}
@@ -505,7 +521,7 @@ export default function OpsCenter() {
                  <div className={styles.chatHeader}>
                     <MessageSquare size={18} /> TACTICAL ASSISTANT
                  </div>
-                 <div className={styles.chatMessages}>
+                 <div className={styles.chatMessages} ref={chatFeedRef} onScroll={onChatFeedScroll}>
                     {chatMessages.map((m, i) => (
                        <div key={i} className={`${styles.message} ${m.role === 'user' ? styles.userMsg : styles.botMsg}`}>
                           {m.role === 'user' ? (
@@ -560,12 +576,28 @@ export default function OpsCenter() {
                        <span>Thinking</span>
                     </label>
 
+                    <div className={styles.suggestions} role="group" aria-label="Sample questions">
+                       {SAMPLE_QUESTIONS.map(q => (
+                         <button
+                           key={q.label}
+                           type="button"
+                           className={styles.suggestionBtn}
+                           title={q.text}
+                           disabled={isSending}
+                           onClick={() => pickSampleQuestion(q.text)}
+                         >
+                           {q.label}
+                         </button>
+                       ))}
+                    </div>
+
                     <input 
+                      ref={chatInputRef}
                       type="text" 
                       value={chatInput}
                       onChange={e => setChatInput(e.target.value)}
                       className={styles.chatInput}
-                      placeholder="Query intelligence..."
+                      placeholder="Ask a question, or pick one above, then press Enter"
                       disabled={isSending}
                     />
                  </form>

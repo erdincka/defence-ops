@@ -35,7 +35,7 @@ Follow this sequence to show the core capabilities.
 - The latest 20 alerts go with every question, so the assistant can tie them to what it sees.
 
 ### 4. Tactical chat
-The chat is the most flexible way to work with the assistant.
+The chat is the most flexible way to work with the assistant. Type any question, or click one of the sample questions above the box (**SITREP**, **Confirm alerts**, **Count vehicles**, **Force strength**, **Likely intent**, **Priorities**, **Next ISR**) to put it in the box, edit it if you like, and press **Enter**.
 
 #### 🧠 Thinking Mode
 - **Checked**: the model reasons before it answers; open **Reasoning** above the answer to see how it got there. Use it for assessments where the logic matters.

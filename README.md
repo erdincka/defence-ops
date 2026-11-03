@@ -177,7 +177,7 @@ pushes only that tag; `latest` stays on the 1.0.x multi-pod images.
 
 ```bash
 docker login -u erdincka
-./scripts/publish_images.sh 1.2.0
+./scripts/publish_images.sh 1.2.1
 ```
 
 Then set `global.image.tag` in `helm/values.yaml`.
@@ -200,13 +200,13 @@ namespace first; the 1.2.0 rollout steps are in `~/Applications/lonpcai/defence-
 2. Package the chart: `helm package helm -d dist`.
 3. Upload it to the chartmuseum (a protected namespace, so the cluster owner does this):
    ```bash
-   kubectl --context lonpcai create --raw /api/v1/namespaces/ez-chartmuseum-ns/services/chartmuseum:8080/proxy/api/charts -f dist/defence-ops-0.2.0.tgz
+   kubectl --context lonpcai create --raw /api/v1/namespaces/ez-chartmuseum-ns/services/chartmuseum:8080/proxy/api/charts -f dist/defence-ops-0.2.1.tgz
    ```
 4. Point the record at the new version. The values set the endpoint and the Keycloak
    issuer, so that `${DOMAIN_NAME}` is substituted in both:
    ```bash
    kubectl --context lonpcai patch ezappconfig defence-ops-0.0.1-1774573363791 --type merge \
-     -p '{"spec":{"chartVersion":"0.2.0","values":"ezua:\n  virtualService:\n    endpoint: \"defence-ops.${DOMAIN_NAME}\"\n    istioGateway: \"istio-system/ezaf-gateway\"\nsettings:\n  oidc:\n    issuer: \"https://keycloak.${DOMAIN_NAME}/realms/UA\"\n"}}'
+     -p '{"spec":{"chartVersion":"0.2.1","values":"ezua:\n  virtualService:\n    endpoint: \"defence-ops.${DOMAIN_NAME}\"\n    istioGateway: \"istio-system/ezaf-gateway\"\nsettings:\n  oidc:\n    issuer: \"https://keycloak.${DOMAIN_NAME}/realms/UA\"\n"}}'
    ```
 5. Check: the record shows `ready` with health `ok`, and `deployment/defence-ops` in
    `defence-ops` is 4/4 ready.
