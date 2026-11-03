@@ -3,6 +3,7 @@
 .dockerignore
 .tiltignore
 helm/
+charts/
 dist/
 *.tgz
 defence-ops-ezapp.yaml

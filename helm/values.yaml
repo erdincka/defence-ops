@@ -22,7 +22,7 @@ global:
   extraEnv: []
   image:
     # Tag for every image that does not set its own.
-    tag: "1.3.0"
+    tag: "1.4.0"
     pullPolicy: IfNotPresent
 
 replicaCount: 1
