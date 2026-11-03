@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AlertCircle, Brain, CheckCircle2, Cpu, Eye, Film, Lock, Radio, RefreshCw, Server, X } from "lucide-react";
 import { api, type DemoConfig, type LlmModel } from "@/lib/api";
+import { useEscapeKey } from "@/lib/useEscapeKey";
 
 interface SettingsViewProps {
   onClose: () => void;
@@ -30,6 +31,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [isLoadingModels, setIsLoadingModels] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  useEscapeKey(onClose);
 
   // State is set in promise callbacks, so the mount effect can call this too.
   const fetchModels = useCallback(
@@ -83,7 +85,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
 
   return (
     <div className="settings-overlay animate-fade-in">
-      <form className="settings-panel" onSubmit={handleSave}>
+      <form className="settings-panel" onSubmit={handleSave} role="dialog" aria-modal="true" aria-label="System Config">
         <header className="settings-header">
           <div className="settings-title-group">
             <Cpu size={24} className="settings-title-icon" />

@@ -45,7 +45,7 @@ flowchart TB
 
     subgraph ns ["One pod"]
         ui["<b>app-ui</b><br/>Next.js dashboard<br/><i>+ config store (PVC)</i>"]
-        vid["<b>video-service</b><br/>FastAPI<br/><i>MJPEG streams · frame extraction</i>"]
+        vid["<b>video-service</b><br/>FastAPI<br/><i>feed playback · clips and frames</i>"]
         llm["<b>llm-service</b><br/>FastAPI<br/><i>VLM orchestration · model capabilities</i>"]
         kaf["<b>kafka-service</b><br/>FastAPI<br/><i>SSE telemetry · alert generation</i>"]
     end
@@ -75,15 +75,20 @@ the latest telemetry to `llm-service`. That service checks what the selected mod
 accepts, as LiteLLM declares it: video-capable models get one short Motion-JPEG clip
 of the feeds, other vision models still frames, and a model that refuses video gets
 frames from then on. Thinking mode is switched on only for models that support it, and the model's
-reasoning comes back separately from the answer. [DIAGRAM.md](./DIAGRAM.md) has the
+reasoning comes back separately from the answer. The model is told which images show
+which feed, and fixed operating rules come ahead of the operators' own instructions:
+answer only from the imagery and alerts supplied, separate what is observed from what
+is assessed, keep a concise military register, and give no targeting details. The
+**Generate Alerts** button writes sample alerts about the feeds in the grid, so the
+ticker and the imagery tell one story. [DIAGRAM.md](./DIAGRAM.md) has the
 detailed version.
 
 | Service | Stack | Responsibility |
 |---|---|---|
 | `app-ui` | Next.js 16, React 19 | Dashboard, admin, and the shared configuration store |
-| `video-service` | FastAPI | MJPEG streaming, uploads, clips and frames for inference |
-| `llm-service` | FastAPI | Model capabilities and vision-language inference via LiteLLM |
-| `kafka-service` | FastAPI | Telemetry over Server-Sent Events, alert generation |
+| `video-service` | FastAPI | Feed playback, uploads, clips and frames for inference |
+| `llm-service` | FastAPI | Prompts, model capabilities and vision-language inference via LiteLLM |
+| `kafka-service` | FastAPI | Live alerts over Server-Sent Events, sample alerts matched to the feeds |
 
 ## What you need
 

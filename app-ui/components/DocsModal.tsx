@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import mermaid from "mermaid";
 import styles from "./DocsModal.module.css";
+import { useEscapeKey } from "@/lib/useEscapeKey";
 
 // Mermaid component to render diagrams
 const Mermaid = ({ content }: { content: string }) => {
@@ -59,6 +60,7 @@ export default function DocsModal({ onClose }: DocsModalProps) {
     const [selectedTab, setSelectedTab] = useState<'USAGE.md' | 'DIAGRAM.md'>('USAGE.md');
     const [content, setContent] = useState<string>("");
     const [loading, setLoading] = useState(false);
+    useEscapeKey(onClose);
 
     useEffect(() => {
         async function fetchDoc() {
@@ -80,7 +82,7 @@ export default function DocsModal({ onClose }: DocsModalProps) {
 
     return (
         <div className={styles.overlay}>
-            <div className={styles.modal}>
+            <div className={styles.modal} role="dialog" aria-modal="true" aria-label="Operational Documentation">
                 <header className={styles.header}>
                     <div className={styles.titleArea}>
                         <BookOpen size={20} className={styles.icon} />
@@ -100,7 +102,7 @@ export default function DocsModal({ onClose }: DocsModalProps) {
                             DIAGRAM
                         </button>
                     </div>
-                    <button className={styles.closeBtn} onClick={onClose}>
+                    <button className={styles.closeBtn} onClick={onClose} aria-label="Close">
                         <X size={24} />
                     </button>
                 </header>

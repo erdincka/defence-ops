@@ -11,7 +11,7 @@ COPY kafka-service/pyproject.toml kafka-service/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY --chown=10001:10001 common/ ./common/
-COPY --chown=10001:10001 kafka-service/main.py kafka-service/settings.py ./
+COPY --chown=10001:10001 kafka-service/main.py kafka-service/settings.py kafka-service/alerts.py ./
 
 # The app user owns the code so that Tilt's live update can replace it
 RUN chown app:app /app

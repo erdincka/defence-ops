@@ -74,6 +74,7 @@ docker_build(
         sync('./llm-service/settings.py', '/app/settings.py'),
         sync('./llm-service/litellm_client.py', '/app/litellm_client.py'),
         sync('./llm-service/media.py', '/app/media.py'),
+        sync('./llm-service/prompts.py', '/app/prompts.py'),
     ]
 )
 
@@ -88,6 +89,7 @@ docker_build(
         sync('./common', '/app/common'),
         sync('./kafka-service/main.py', '/app/main.py'),
         sync('./kafka-service/settings.py', '/app/settings.py'),
+        sync('./kafka-service/alerts.py', '/app/alerts.py'),
     ]
 )
 

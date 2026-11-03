@@ -1,5 +1,6 @@
 """Visual context for a question: one short clip or a few frames, built by video-service."""
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -41,19 +42,38 @@ async def fetch_clip(base_url: str, videos: list[str]) -> str:
     return clip
 
 
-async def fetch_frames(base_url: str, videos: list[str], max_images: int) -> list[str]:
-    """Captures still frames, spread so every feed is represented within max_images.
+async def _feed_frames(base_url: str, video: str, count: int) -> list[str]:
+    data = await _get(base_url, "/api/v1/video/combined-frames", {"vids": video, "count": count})
+    frames = data.get("images_b64")
+    return [f for f in frames if isinstance(f, str)] if isinstance(frames, list) else []
+
+
+async def fetch_frames(
+    base_url: str, videos: list[str], max_images: int
+) -> list[tuple[str, list[str]]]:
+    """Captures still frames per feed, spread so every feed is represented within max_images.
+
+    Each feed is fetched on its own, so the model can be told which images show which feed.
 
     Returns:
-        JPEG data URLs, at most max_images.
+        (video, JPEG data URLs) for each feed that gave frames, in the order asked, with at most
+        max_images frames in all.
+
+    Raises:
+        MediaError: No feed gave any frames.
     """
     per_feed = max(1, max_images // len(videos))
-    data = await _get(
-        base_url,
-        "/api/v1/video/combined-frames",
-        {"vids": ",".join(videos), "count": per_feed},
+    results = await asyncio.gather(
+        *(_feed_frames(base_url, v, per_feed) for v in videos), return_exceptions=True
     )
-    frames = data.get("images_b64")
-    if not isinstance(frames, list) or not frames:
-        raise MediaError("video-service returned no frames")
-    return [f for f in frames if isinstance(f, str)][:max_images]
+    feeds: list[tuple[str, list[str]]] = []
+    budget = max_images
+    for video, result in zip(videos, results, strict=True):
+        if isinstance(result, BaseException) or not result or budget <= 0:
+            continue
+        feeds.append((video, result[:budget]))
+        budget -= len(feeds[-1][1])
+    if not feeds:
+        first_error = next((r for r in results if isinstance(r, BaseException)), None)
+        raise MediaError(str(first_error) if first_error else "video-service returned no frames")
+    return feeds

@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import main
+import prompts
 from litellm_client import LiteLLMClient, ModelCapabilities
 
 MODELS = {"data": [{"id": "nemotron-vl"}, {"id": "qwen3-vl"}, {"id": "text-only"}]}
@@ -70,8 +71,8 @@ def api(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[TestClient, FakeLiteL
     async def clip(_base: str, videos: list[str]) -> str:
         return f"data:video/mp4;base64,{'+'.join(videos)}"
 
-    async def frames(_base: str, videos: list[str], max_images: int) -> list[str]:
-        return [f"data:image/jpeg;base64,{v}" for v in videos][:max_images]
+    async def frames(_base: str, videos: list[str], max_images: int) -> list[tuple[str, list[str]]]:
+        return [(v, [f"data:image/jpeg;base64,{v}"]) for v in videos][:max_images]
 
     monkeypatch.setattr(main, "load_demo_config", settings)
     monkeypatch.setattr(main, "fetch_clip", clip)
@@ -214,3 +215,59 @@ def test_missing_key_explains_the_fix(
     response = client.get("/api/v1/llm/models")
     assert response.status_code == 503
     assert "defence-ops-litellm" in response.json()["detail"]
+
+
+def test_the_model_is_told_which_image_shows_which_feed(
+    api: tuple[TestClient, FakeLiteLLM], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, fake = api
+
+    async def settings() -> dict[str, Any]:
+        return {"llm_model": "qwen3-vl"}
+
+    monkeypatch.setattr(main, "load_demo_config", settings)
+    ask(
+        client,
+        message="SITREP",
+        system_prompt="Report as a SITREP.",
+        videos=["convoy.mp4", "naval_exercises.mp4"],
+        kafka_context=[
+            {
+                "timestamp": 1793649055,
+                "severity": "CRITICAL",
+                "location": "Naval Exercises · Harbour",
+                "message": "Rocket salvo fired.",
+            }
+        ],
+    )
+    system, user = fake.chats[0]["messages"]
+    assert system["content"].startswith(prompts.OPERATING_RULES)
+    assert system["content"].endswith("Report as a SITREP.")
+    text = user["content"][0]["text"]
+    assert text.startswith("TASKING: SITREP")
+    assert "image 1 Convoy; image 2 Naval Exercises" in text
+    assert "- 1950Z CRITICAL | Naval Exercises · Harbour: Rocket salvo fired." in text
+
+
+def test_the_clip_is_described_in_feed_order(api: tuple[TestClient, FakeLiteLLM]) -> None:
+    client, fake = api
+    ask(client, videos=["tank_footage.mp4", "convoy.mp4"])
+    text = fake.chats[0]["messages"][-1]["content"][0]["text"]
+    assert "showing these feeds in this order: 1. Tank Footage; 2. Convoy." in text
+    assert "ALERTS: none received." in text
+
+
+def test_the_rules_stand_without_operator_instructions(
+    api: tuple[TestClient, FakeLiteLLM],
+) -> None:
+    client, fake = api
+    ask(client, system_prompt="   ")
+    system, user = fake.chats[0]["messages"]
+    assert system["content"] == prompts.OPERATING_RULES
+    assert "IMAGERY: none attached. Answer from the alerts and the tasking." in user["content"]
+
+
+def test_frames_note_counts_images_per_feed() -> None:
+    note = prompts.frames_note([("convoy.mp4", 2), ("tactical_unit.mp4", 1)])
+    assert note.startswith("IMAGERY: 3 still images in this order: images 1-2 Convoy; image 3 ")
+    assert "image 3 Tactical Unit." in note

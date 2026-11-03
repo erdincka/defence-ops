@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { ShieldAlert, MessageSquare, Play, Square, Crosshair, Upload, Activity, Settings2, Eye, Zap, ChevronLeft, ChevronRight, Settings, BookOpen } from "lucide-react";
+import { ShieldAlert, MessageSquare, Play, Square, Crosshair, Upload, Activity, Settings2, Eye, Zap, ChevronLeft, ChevronRight, Settings, BookOpen, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -25,6 +25,25 @@ const getBaseUrl = (envVar: string | undefined, defaultLocal: string) => {
 
 
 const API_BASE = ""; 
+
+// The operator can rewrite these on the dashboard. llm-service always puts its own operating rules
+// first (grounding, observed vs assessed, military register), so clearing them loses only the format.
+const DEFAULT_SYSTEM_PROMPT =
+  "You are the intelligence watchkeeper in a joint operations centre, reporting to the commander. " +
+  "Use the format the tasking asks for, such as a SITREP or a SALUTE report. Otherwise answer as: " +
+  "BLUF (one or two lines); OBSERVED, by feed; THREATS, each with likelihood and impact; " +
+  "RECOMMENDED ACTIONS in priority order. Keep answers under 200 words unless asked for more.";
+// The default before 1.2.0. Browsers saved it on first visit, so treat it as "not customised".
+const LEGACY_SYSTEM_PROMPT =
+  "You are an advanced military AI assisting a Command & Control centre. Analyse visuals objectively and provide concise tactical assessments.";
+const SYSTEM_PROMPT_KEY = "ops_system_prompt";
+
+// Feed names as operators see them; llm-service and kafka-service use the same rule (common/feeds.py).
+const formatFileName = (name: string) => {
+  if (!name) return "";
+  const base = name.split('.').slice(0, -1).join('.').replace(/[-_]/g, ' ');
+  return base.split(' ').filter(Boolean).map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+};
 
 interface VideoSource {
   filename: string;
@@ -54,21 +73,23 @@ export default function OpsCenter() {
   const [activeModel, setActiveModel] = useState<LlmModel | null>(null);
 
   const [logs, setLogs] = useState<Alert[]>([]);
-  const [systemPrompt, setSystemPrompt] = useState("You are an advanced military AI assisting a Command & Control centre. Analyse visuals objectively and provide concise tactical assessments.");
+  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [isKafkaConfigured, setIsKafkaConfigured] = useState<boolean | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const savedPrompt = localStorage.getItem("ops_system_prompt");
-    if (savedPrompt) {
+    const savedPrompt = localStorage.getItem(SYSTEM_PROMPT_KEY);
+    if (savedPrompt && savedPrompt !== LEGACY_SYSTEM_PROMPT) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- restored after hydration: the server render has no localStorage
       setSystemPrompt(savedPrompt);
     }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("ops_system_prompt", systemPrompt);
+    // Only keep the operator's own wording, so a better default reaches everyone else.
+    if (systemPrompt === DEFAULT_SYSTEM_PROMPT) localStorage.removeItem(SYSTEM_PROMPT_KEY);
+    else localStorage.setItem(SYSTEM_PROMPT_KEY, systemPrompt);
   }, [systemPrompt]);
 
   useEffect(() => {
@@ -218,21 +239,32 @@ export default function OpsCenter() {
   const handleSpecialAnalysis = async (videoFilename: string, type: 'threat' | 'objects') => {
     if (isSending || !videoFilename) return;
 
+    const feed = formatFileName(videoFilename);
     const prompt = type === 'threat'
-      ? "As an elite military intelligence analyst, perform an immediate threat assessment on the provided visual feed (analysing the last sequence of frames). Identify any active, imminent, or potential threats to security, personnel, or infrastructure. Provide a concise, high-priority tactical summary of risks and recommended countermeasures. Respond with authority and precision."
-      : "Acting as a top-tier military reconnaissance specialist, identify all objects of interest within this video sequence. Focus on military hardware (vehicles, weaponry, comms), tactical assets, and personnel formations. Provide an itemised report detailing the nature, quantity, and suspected strategic significance of each identified object. Ensure the assessment is detailed and professional.";
+      ? `THREAT ASSESSMENT of the ${feed} feed. BLUF first. Then OBSERVED: platforms, personnel, ` +
+        "weapons and activity. Then THREATS, each with type, likelihood (high, medium or low), " +
+        "potential impact and time frame. Then RECOMMENDED ACTIONS in priority order: protective, " +
+        `reporting and collection measures. Use only the alerts whose location starts with "${feed}".`
+      : `SALUTE REPORT on the ${feed} feed: Size, Activity, Location (terrain and setting as seen), ` +
+        `Unit (markings or type, if identifiable), Time (from alerts whose location starts with "${feed}", ` +
+        'otherwise "not shown"), Equipment. Then a table of objects of interest with the columns Object, ' +
+        "Count and Notes. Mark estimated counts as estimates.";
 
     const userDisplayMsg = type === 'threat'
-      ? `[TACTICAL SCAN] Initiating Threat Assessment on: ${videoFilename}`
-      : `[RECONNAISSANCE] Identifying Objects of Interest in: ${videoFilename}`;
+      ? `[THREAT ASSESSMENT] ${feed}`
+      : `[SALUTE REPORT] ${feed}`;
 
     await askModel(prompt, [videoFilename], userDisplayMsg);
   };
 
   const handleGenerateAlerts = async () => {
+    // Alerts match the feeds in the grid; with none selected they are general.
+    const feeds = Array.from(new Set(selectedVideos.filter(Boolean)));
     try {
       const res = await fetch(`${API_BASE}/api/v1/kafka/generate`, {
-        method: 'POST'
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ feeds }),
       });
       const data = await res.json();
       if (data.status === 'success') {
@@ -290,16 +322,6 @@ export default function OpsCenter() {
     });
   };
 
-  const formatFileName = (name: string) => {
-    if (!name) return "";
-    // Remove extension
-    let base = name.split('.').slice(0, -1).join('.');
-    // Replace - and _ with space
-    base = base.replace(/[-_]/g, ' ');
-    // Capitalize first letters of every word
-    return base.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-  };
-
   return (
     <div className={styles.container}>
       <header className={styles.header}>
@@ -349,7 +371,7 @@ export default function OpsCenter() {
                              <button 
                                onClick={() => handleSpecialAnalysis(selectedVideos[i], 'threat')}
                                className={`${styles.analysisBtn} ${styles.threatBtn}`}
-                               title="Threat Detection"
+                               title="Threat assessment"
                                disabled={isSending || !selectedVideos[i]}
                              >
                                 <ShieldAlert size={16} />
@@ -358,7 +380,7 @@ export default function OpsCenter() {
                              <button 
                                onClick={() => handleSpecialAnalysis(selectedVideos[i], 'objects')}
                                className={styles.analysisBtn}
-                               title="Identify Objects"
+                               title="SALUTE report (objects of interest)"
                                disabled={isSending || !selectedVideos[i]}
                              >
                                 <Eye size={16} />
@@ -408,7 +430,7 @@ export default function OpsCenter() {
                         <button 
                           onClick={handleGenerateAlerts}
                           className={styles.generateBtn}
-                          title="Generate Sample Alerts"
+                          title="Generate sample alerts about the selected feeds"
                         >
                            <Zap size={10} /> Generate Alerts
                         </button>
@@ -460,12 +482,22 @@ export default function OpsCenter() {
               <div className={styles.promptContainer}>
                  <div className={styles.promptHeader}>
                     <Settings2 size={16} /> ASSISTANT INSTRUCTIONS
+                    {systemPrompt !== DEFAULT_SYSTEM_PROMPT && (
+                      <button
+                        type="button"
+                        className={styles.resetBtn}
+                        onClick={() => setSystemPrompt(DEFAULT_SYSTEM_PROMPT)}
+                        title="Restore the default instructions"
+                      >
+                        <RotateCcw size={10} /> Reset
+                      </button>
+                    )}
                  </div>
                  <textarea 
                    className={styles.promptInput}
                    value={systemPrompt}
                    onChange={(e) => setSystemPrompt(e.target.value)}
-                   placeholder="System prompt..."
+                   placeholder="Instructions for the assistant (optional)"
                  />
               </div>
 
@@ -496,7 +528,7 @@ export default function OpsCenter() {
                     ))}
                     {isSending && (
                       <div className={`${styles.message} ${styles.botMsg}`} style={{opacity: 0.6}}>
-                        Analyzing...
+                        Analysing…
                       </div>
                     )}
                  </div>
@@ -509,7 +541,7 @@ export default function OpsCenter() {
                        <option value="smart">Context: Smart (Active Streams)</option>
                        <option value="none">Context: None</option>
                        {videos.map(v => (
-                          <option key={v.filename} value={v.filename}>{v.filename}</option>
+                          <option key={v.filename} value={v.filename}>Context: {formatFileName(v.filename)}</option>
                        ))}
                     </select>
                     

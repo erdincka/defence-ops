@@ -2,19 +2,20 @@
 
 import asyncio
 import json
-import random
-import time
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import Annotated, Any
 
 import structlog
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from aiokafka.helpers import create_ssl_context
-from fastapi import FastAPI, Request
+from fastapi import Body, FastAPI, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 
+from alerts import profile_for, sample_alerts
 from common.demo_config import load_demo_config
+from common.feeds import VideoName, feed_label
 from common.logging_config import setup_logging
 from settings import get_settings
 
@@ -149,45 +150,23 @@ async def kafka_stream(request: Request) -> EventSourceResponse:
     return EventSourceResponse(event_generator())
 
 
-SEVERITIES = ["CRITICAL", "WARNING", "INFO"]
-LOCATIONS = [
-    "Sector 7G",
-    "North Perimeter",
-    "Command Centre",
-    "Fuel Depot",
-    "South Outpost",
-    "East Ridge",
-    "Observation Deck",
-    "Hangar A-1",
-    "Comms Relay",
-    "Tactical Bay",
-]
-OBJECTS = [
-    "Unidentified drone",
-    "Inbound aircraft",
-    "Suspicious vehicle",
-    "Thermal signature",
-    "Unknown signal",
-]
-AREAS = ["restricted airspace", "perimeter fence", "approach vector 4", "landing zone echo"]
-SYSTEMS = ["Pressure sensors", "Optical sensors", "Power grid", "Uplink signal", "Cooling"]
-REPORTS = ["Visual contact confirmed", "Lost contact", "Signal interference", "All clear"]
-TEMPLATES = [
-    lambda: f"{random.choice(OBJECTS)} detected in {random.choice(AREAS)}.",
-    lambda: f"{random.choice(SYSTEMS)} anomaly reported.",
-    lambda: f"Intrusion alarm triggered near {random.choice(LOCATIONS)}.",
-    lambda: f"Priority relay: {random.choice(REPORTS)}.",
-    lambda: f"Automated scan of {random.choice(LOCATIONS)} completed.",
-]
+class GenerateRequest(BaseModel):
+    """Which feeds the operator has on screen, so the sample alerts can match them."""
+
+    feeds: list[VideoName] = Field(default_factory=list, max_length=4)
 
 
 @app.post("/api/v1/kafka/generate")
-async def generate_sample_messages() -> Any:
-    """Generates 3-5 sample tactical alerts and produces them to Kafka.
+async def generate_sample_messages(req: Annotated[GenerateRequest | None, Body()] = None) -> Any:
+    """Generates 3-5 sample tactical alerts about the given feeds and produces them to Kafka.
+
+    Args:
+        req: The feeds on screen; without any, or with none recognised, the alerts are general.
 
     Returns:
         A dictionary with status and message.
     """
+    feeds = req.feeds if req else []
     try:
         broker, topic = await get_kafka_target()
         kwargs = connection_kwargs(broker)
@@ -197,19 +176,13 @@ async def generate_sample_messages() -> Any:
     producer = AIOKafkaProducer(**kwargs)
     try:
         await producer.start()
-        alerts = [
-            {
-                "timestamp": time.time(),
-                "severity": random.choice(SEVERITIES),
-                "location": random.choice(LOCATIONS),
-                "message": random.choice(TEMPLATES)(),
-            }
-            for _ in range(random.randint(3, 5))
-        ]
+        alerts = sample_alerts(feeds)
         for alert in alerts:
             await producer.send_and_wait(topic, json.dumps(alert).encode("utf-8"))
-            logger.info("sent_sample_alert", topic=topic, alert=alert["message"])
-        return {"status": "success", "message": f"Generated {len(alerts)} sample alerts"}
+            logger.info("sent_sample_alert", topic=topic, location=alert["location"])
+        matched = sorted({feed_label(f) for f in feeds if profile_for(f)})
+        about = f"for {', '.join(matched)}" if matched else "(general, no matching feed selected)"
+        return {"status": "success", "message": f"Generated {len(alerts)} alerts {about}"}
     except Exception as e:
         logger.error("producer_error", error=str(e), exc_info=True)
         return JSONResponse(

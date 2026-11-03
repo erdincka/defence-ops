@@ -11,7 +11,7 @@ COPY llm-service/pyproject.toml llm-service/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY --chown=10001:10001 common/ ./common/
-COPY --chown=10001:10001 llm-service/main.py llm-service/settings.py llm-service/litellm_client.py llm-service/media.py ./
+COPY --chown=10001:10001 llm-service/main.py llm-service/settings.py llm-service/litellm_client.py llm-service/media.py llm-service/prompts.py ./
 
 # The app user owns the code so that Tilt's live update can replace it
 RUN chown app:app /app

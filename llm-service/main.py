@@ -5,13 +5,15 @@ import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 import structlog
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field
 
+import prompts
 from common.demo_config import load_demo_config
+from common.feeds import VideoName
 from common.logging_config import setup_logging
 from litellm_client import (
     LiteLLMClient,
@@ -20,6 +22,7 @@ from litellm_client import (
     ModelCapabilities,
 )
 from media import MediaError, fetch_clip, fetch_frames
+from prompts import Alert
 from settings import get_settings
 
 setup_logging("llm-service")
@@ -27,8 +30,6 @@ logger = structlog.get_logger(__name__)
 settings = get_settings()
 
 ContextMode = Literal["video", "frames", "none"]
-# Names as /api/v1/video/list returns them: no paths.
-VideoName = Annotated[str, StringConstraints(pattern=r"^\w[\w .-]*\.(mp4|mov)$", max_length=200)]
 THINK_BLOCK = re.compile(r"<think>(.*?)</think>", re.DOTALL)
 # Statuses that mean the clip itself was refused, so frames are worth a retry: the model says so
 # (vLLM: 400), or LiteLLM does (its token counter fails on video_url parts for Ollama models with a
@@ -62,14 +63,6 @@ client = LiteLLMClient(
     settings.request_timeout_seconds,
     settings.models_cache_seconds,
 )
-
-
-class Alert(BaseModel):
-    """One tactical alert from the Kafka ticker."""
-
-    severity: str = Field(default="INFO", max_length=20)
-    location: str | None = Field(default=None, max_length=200)
-    message: str = Field(default="", max_length=2000)
 
 
 class ChatRequest(BaseModel):
@@ -139,23 +132,34 @@ def _initial_mode(caps: ModelCapabilities, notices: list[str]) -> ContextMode:
 
 async def _visual_parts(
     videos: list[str], mode: ContextMode, notices: list[str]
-) -> tuple[list[dict[str, Any]], ContextMode]:
+) -> tuple[list[dict[str, Any]], ContextMode, str]:
+    """Builds the imagery for the request and the note that tells the model what it shows."""
     if mode == "video":
         try:
             clip = await fetch_clip(settings.video_service_url, videos)
-            return [{"type": "video_url", "video_url": {"url": clip}}], "video"
+            return (
+                [{"type": "video_url", "video_url": {"url": clip}}],
+                "video",
+                prompts.clip_note(videos),
+            )
         except MediaError as e:
             logger.warning("video_clip_failed", error=str(e))
             notices.append("The video clip could not be built, so still frames were sent instead.")
             mode = "frames"
     if mode == "frames":
         try:
-            frames = await fetch_frames(settings.video_service_url, videos, settings.max_images)
-            return [{"type": "image_url", "image_url": {"url": f}} for f in frames], "frames"
+            feeds = await fetch_frames(settings.video_service_url, videos, settings.max_images)
+            parts = [
+                {"type": "image_url", "image_url": {"url": frame}}
+                for _, frames in feeds
+                for frame in frames
+            ]
+            note = prompts.frames_note([(video, len(frames)) for video, frames in feeds])
+            return parts, "frames", note
         except MediaError as e:
             logger.warning("frame_capture_failed", error=str(e))
             notices.append("Frames could not be captured, so the model answered from text only.")
-    return [], "none"
+    return [], "none", prompts.no_imagery_note(videos)
 
 
 def _thinking_params(enabled: bool, caps: ModelCapabilities) -> dict[str, Any]:
@@ -175,22 +179,20 @@ def _thinking_params(enabled: bool, caps: ModelCapabilities) -> dict[str, Any]:
 
 
 def _payload(
-    req: ChatRequest, caps: ModelCapabilities, parts: list[dict[str, Any]], thinking: bool
+    req: ChatRequest,
+    caps: ModelCapabilities,
+    parts: list[dict[str, Any]],
+    imagery: str,
+    thinking: bool,
 ) -> dict[str, Any]:
-    text = req.message
-    if req.kafka_context:
-        alerts = "\n".join(
-            f"[{a.severity}] {a.location + ': ' if a.location else ''}{a.message}"
-            for a in req.kafka_context[-20:]
-        )
-        text = f"QUERY: {req.message}\n\nLATEST TACTICAL DATA (KAFKA):\n{alerts}"
+    text = prompts.user_text(req.message, imagery, req.kafka_context)
     content: str | list[dict[str, Any]] = (
         [{"type": "text", "text": text}, *parts] if parts else text
     )
-    messages: list[dict[str, Any]] = []
-    if req.system_prompt:
-        messages.append({"role": "system", "content": req.system_prompt})
-    messages.append({"role": "user", "content": content})
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": prompts.system_message(req.system_prompt)},
+        {"role": "user", "content": content},
+    ]
     return {
         "model": caps.id,
         "messages": messages,
@@ -250,11 +252,11 @@ async def chat(req: ChatRequest) -> dict[str, Any]:
         notices.append(f"{model} does not support thinking mode, so it answered without it.")
 
     mode: ContextMode = _initial_mode(caps, notices) if req.videos else "none"
-    parts, mode = await _visual_parts(req.videos, mode, notices)
+    parts, mode, imagery = await _visual_parts(req.videos, mode, notices)
     logger.info("llm_chat", model=model, context=mode, feeds=len(req.videos), thinking=thinking)
 
     try:
-        result = await client.chat(_payload(req, caps, parts, thinking))
+        result = await client.chat(_payload(req, caps, parts, imagery, thinking))
     except LiteLLMNotConfiguredError as e:
         raise _http_error(e) from e
     except LiteLLMError as e:
@@ -264,9 +266,9 @@ async def chat(req: ChatRequest) -> dict[str, Any]:
         logger.warning("video_refused", model=model, status_code=e.status_code, error=str(e))
         client.mark_video_refused(model)
         notices.append(f"{model} refused the video clip, so still frames were sent instead.")
-        parts, mode = await _visual_parts(req.videos, "frames", notices)
+        parts, mode, imagery = await _visual_parts(req.videos, "frames", notices)
         try:
-            result = await client.chat(_payload(req, caps, parts, thinking))
+            result = await client.chat(_payload(req, caps, parts, imagery, thinking))
         except LiteLLMError as retry_error:
             raise _http_error(retry_error) from retry_error
 

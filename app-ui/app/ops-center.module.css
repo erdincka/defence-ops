@@ -409,6 +409,25 @@
   align-items: center;
   font-size: 12px;
 }
+.resetBtn {
+  margin-left: auto;
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid #334155;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.resetBtn:hover {
+  color: #e2e8f0;
+  border-color: #64748b;
+}
 .generateBtn {
   background: rgba(245, 158, 11, 0.1);
   color: #f59e0b;
