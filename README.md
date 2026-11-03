@@ -174,12 +174,16 @@ app trusts what the platform trusts. Elsewhere it is the public authorities.
 
 ## Install on Private Cloud AI
 
-1. Package the chart:
+1. Download the latest chart package and the logo. There's no need to clone the
+   repository or build anything; the images come from Docker Hub.
    ```bash
-   helm package helm
+   curl -LO https://github.com/erdincka/defence-ops/raw/main/charts/defence-ops-0.4.0.tgz
+   curl -LO https://github.com/erdincka/defence-ops/raw/main/defence-ops.png
    ```
+   [`charts/`](./charts) always holds the latest release's package, built from
+   [`helm/`](./helm).
 2. In PCAI, under **Tools & Frameworks**, choose **Import Framework**. Give it the chart
-   (`defence-ops-<version>.tgz`), the logo (`defence-ops.png`) and a namespace, then set
+   (`defence-ops-0.4.0.tgz`), the logo (`defence-ops.png`) and a namespace, then set
    the values:
    - Keep the `ezua` block as it is: PCAI fills in `${DOMAIN_NAME}` and
      `${OIDC_CLIENT_ID}`.
@@ -225,7 +229,7 @@ The chart also installs with plain Helm on a cluster with Istio and an oauth2-pr
 external authoriser like PCAI's. Set the values PCAI would fill in:
 
 ```bash
-helm install defence-ops ./helm --namespace defence-ops --create-namespace \
+helm install defence-ops ./defence-ops-0.4.0.tgz --namespace defence-ops --create-namespace \
   --set ezua.domainName=<your domain> \
   --set ezua.oidc.client_id=<OIDC client the sign-in uses> \
   --set ezua.virtualService.endpoint=defence-ops.<your domain> \
@@ -297,11 +301,17 @@ To publish images, sign in to your registry and pass the version; `IMAGE_PREFIX`
 registry and account (default `erdincka` on Docker Hub). The script pushes only that tag.
 
 ```bash
-IMAGE_PREFIX=registry.example.com/team ./scripts/publish_images.sh 1.3.0
+IMAGE_PREFIX=registry.example.com/team ./scripts/publish_images.sh 1.4.0
 ```
 
 Then set `global.image.tag` (and the image repositories, for another prefix) in
-`helm/values.yaml`.
+`helm/values.yaml`. To release, bump `version` in `helm/Chart.yaml`, swap the package in
+`charts/` for the new one, and update the version in the download commands above:
+
+```bash
+git rm -q charts/defence-ops-<previous version>.tgz
+helm package helm --destination charts
+```
 
 Each Python service is a uv project (`pyproject.toml`, `uv.lock`) with its own tests;
 run them in a container, for example:
