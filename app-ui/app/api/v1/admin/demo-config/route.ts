@@ -62,8 +62,17 @@ async function saveConfig(config: StoredConfig): Promise<void> {
   await fs.rename(/*turbopackIgnore: true*/ tmpPath, /*turbopackIgnore: true*/ CONFIG_PATH);
 }
 
+// The chart's defaults (llm.model, kafka.broker, kafka.topic), shown and used until an administrator
+// saves a value of their own; common/demo_config.py applies the same rule for the backends.
+const DEFAULTS: DemoServices = {
+  llm_model: process.env.LLM_MODEL ?? "",
+  kafka_broker: process.env.KAFKA_BROKER ?? "",
+  kafka_topic: process.env.KAFKA_TOPIC ?? "",
+};
+
 function publicSettings(stored: Record<string, unknown>): DemoServices {
-  const text = (key: keyof DemoServices) => (typeof stored[key] === "string" ? (stored[key] as string) : "");
+  const text = (key: keyof DemoServices) =>
+    typeof stored[key] === "string" && stored[key] !== "" ? (stored[key] as string) : DEFAULTS[key];
   return { llm_model: text("llm_model"), kafka_broker: text("kafka_broker"), kafka_topic: text("kafka_topic") };
 }
 

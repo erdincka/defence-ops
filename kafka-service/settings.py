@@ -11,16 +11,16 @@ class KafkaSettings(BaseSettings):
     """Connection settings the Helm chart sets; the broker and topic come from System Config.
 
     Attributes:
-        kafka_username: SASL user, from Secret defence-ops-kafka.
-        kafka_password: SASL password, from the same Secret.
+        kafka_sasl_username: SASL user (KAFKA_SASL_USERNAME), from the chart's Kafka Secret.
+        kafka_sasl_password: SASL password (KAFKA_SASL_PASSWORD), from the same Secret.
         kafka_security_protocol: How the broker expects clients to connect.
         kafka_sasl_mechanism: SASL mechanism for SASL_* protocols.
         kafka_ssl_cafile: CA bundle for SSL protocols; the system store when unset.
         max_stream_clients: Live alert streams served at once; each holds a consumer.
     """
 
-    kafka_username: str | None = None
-    kafka_password: SecretStr | None = None
+    kafka_sasl_username: str | None = None
+    kafka_sasl_password: SecretStr | None = None
     kafka_security_protocol: Literal["PLAINTEXT", "SSL", "SASL_PLAINTEXT", "SASL_SSL"] = (
         "SASL_PLAINTEXT"
     )

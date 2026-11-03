@@ -1,4 +1,12 @@
+# Platform settings. On HPE Private Cloud AI, the Import Framework fills in the ${...} placeholders:
+# keep them as they are. For a plain `helm install`, set the real values instead.
 ezua:
+  # The cluster's domain. The Keycloak issuer is https://keycloak.<domainName>/realms/UA.
+  domainName: "${DOMAIN_NAME}"
+  oidc:
+    # The client PCAI's sign-in uses: the audience of the ID token the app checks to recognise
+    # administrators. The app only verifies that token, so it needs no client secret.
+    client_id: "${OIDC_CLIENT_ID}"
   virtualService:
     endpoint: "defence-ops.${DOMAIN_NAME}"
     istioGateway: "istio-system/ezaf-gateway"
@@ -13,7 +21,8 @@ global:
   # Extra environment variables for every container, as a list of Kubernetes EnvVar objects.
   extraEnv: []
   image:
-    tag: "1.2.1"
+    # Tag for every image that does not set its own.
+    tag: "1.3.0"
     pullPolicy: IfNotPresent
 
 replicaCount: 1
@@ -22,34 +31,44 @@ serviceAccount:
   create: true
   name: ""
 
-# Models come from the in-cluster LiteLLM proxy with the app's own virtual key, kept in a Secret
-# created outside the release: kubectl create secret generic defence-ops-litellm
-# --from-file=api-key=<key file>. Model capabilities (vision, video, reasoning) come from LiteLLM's
-# model_info for each model.
+# Models come from a LiteLLM proxy (OpenAI-compatible) with a virtual key for this app. Which models
+# take images, video and thinking mode comes from each model's model_info in LiteLLM.
 llm:
   baseUrl: http://litellm.litellm.svc.cluster.local:4000
-  apiKeySecret:
-    name: defence-ops-litellm
+  # The app's LiteLLM key. Either give it here, and the chart stores it in a Secret, or name a
+  # Secret that already holds it (existingSecret wins when both are set).
+  apiKey: ""
+  existingSecret:
+    name: ""
     key: api-key
+  # Model to use until an administrator picks one on System Config; it must take images.
+  model: ""
   # Frames sent to a model that takes images but not video
   maxImages: 5
 
-# Broker and topic are set on System Config; the credentials are a Secret created outside the
-# release, with keys username and password, for a user limited to the alerts stream.
+# Live alerts from a Kafka broker (optional: without one the dashboard runs without the ticker).
 kafka:
-  credentialsSecret:
-    name: defence-ops-kafka
+  # Defaults until an administrator sets them on System Config: host:port[,host:port] and topic.
+  broker: ""
+  topic: ""
   securityProtocol: SASL_PLAINTEXT
+  # PLAIN, SCRAM-SHA-256 or SCRAM-SHA-512
   saslMechanism: PLAIN
+  # Credentials for the SASL protocols. Either give them here, and the chart stores them in a
+  # Secret, or name a Secret that holds them under the keys username and password.
+  username: ""
+  password: ""
+  existingSecret:
+    name: ""
 
-# Who may change System Config. oidc verifies the Keycloak ID token oauth2-proxy forwards and
-# needs adminRole among the user's realm roles; open lets anyone, for the Tilt dev loop only.
+# Who may change System Config. oidc verifies the Keycloak ID token that PCAI's sign-in forwards
+# and needs adminRole among the user's realm roles; open lets anyone, for the Tilt dev loop only.
 settings:
   auth: oidc
   adminRole: admin
-  oidc:
-    issuer: "https://keycloak.${DOMAIN_NAME}/realms/UA"
-    audience: ua
+  # Where the app fetches Keycloak's signing keys: its in-cluster Service, as PCAI's oauth2-proxy
+  # does, so it needs no trust in the ingress certificate. Empty means the issuer's public URL.
+  oidcJwksUrl: http://keycloak.keycloak.svc.cluster.local/realms/UA/protocol/openid-connect/certs
 
 # Only the Istio ingress gateway may reach the pod, so nothing in the cluster can go round SSO.
 networkPolicy:
@@ -69,13 +88,16 @@ persistence:
   claimName: app-data
   size: 100Mi
 
-# All four services share one pod, so each listens on its own port. Resource requests are calculated
-# from peak use measured on lonpcai on 2026-11-02. Under the UI's frame and video-context calls for
-# every video, then three all-video requests at once: kafka-service 68 MiB, llm-service 124 MiB,
-# video-service 449 MiB and about 2 CPU cores. app-ui (built, `next start`) peaked at 257 MiB in the
-# 1.0.1 release. Limits leave headroom above that.
+# All four services share one pod, so each listens on its own port. Each image's tag defaults to
+# global.image.tag. Resource requests are calculated from peak use measured on a PCAI cluster on
+# 2026-11-02. Under the UI's frame and video-context calls for every video, then three all-video
+# requests at once: kafka-service 68 MiB, llm-service 124 MiB, video-service 449 MiB and about 2
+# CPU cores. app-ui (built, `next start`) peaked at 257 MiB in the 1.0.1 release. Limits leave
+# headroom above that.
 appUi:
-  image: erdincka/defence-ops-app-ui
+  image:
+    repository: erdincka/defence-ops-app-ui
+    tag: ""
   port: 3000
   probePath: /
   resources:
@@ -87,7 +109,9 @@ appUi:
       memory: 2Gi
 
 kafkaService:
-  image: erdincka/defence-ops-kafka-service
+  image:
+    repository: erdincka/defence-ops-kafka-service
+    tag: ""
   port: 8001
   probePath: /health
   resources:
@@ -99,7 +123,9 @@ kafkaService:
       memory: 512Mi
 
 llmService:
-  image: erdincka/defence-ops-llm-service
+  image:
+    repository: erdincka/defence-ops-llm-service
+    tag: ""
   port: 8002
   probePath: /health
   resources:
@@ -111,7 +137,9 @@ llmService:
       memory: 1Gi
 
 videoService:
-  image: erdincka/defence-ops-video-service
+  image:
+    repository: erdincka/defence-ops-video-service
+    tag: ""
   port: 8003
   probePath: /health
   # Custom uploads live on a scratch volume until the pod restarts

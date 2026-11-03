@@ -214,7 +214,7 @@ def test_missing_key_explains_the_fix(
     monkeypatch.setattr(main, "client", make_client(fake, key=None))
     response = client.get("/api/v1/llm/models")
     assert response.status_code == 503
-    assert "defence-ops-litellm" in response.json()["detail"]
+    assert "llm.apiKey" in response.json()["detail"]
 
 
 def test_the_model_is_told_which_image_shows_which_feed(

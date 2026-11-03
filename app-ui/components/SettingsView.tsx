@@ -118,7 +118,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                 <div className="field-label">
                   <label htmlFor="llm-model">Model</label>
                   <p className="field-hint">
-                    Models this app&apos;s key may use on the in-cluster LiteLLM. Pick one that accepts images.
+                    Models this app&apos;s key may use on LiteLLM. Pick one that accepts images.
                   </p>
                 </div>
                 <div className="field-value">
@@ -180,7 +180,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                     <input
                       id="kafka-broker"
                       type="text"
-                      placeholder="df.lon-pcai.twlon.com:9092"
+                      placeholder="kafka.example.com:9092"
                       value={config.kafka_broker}
                       disabled={!canEdit}
                       onChange={(e) => setConfig((prev) => ({ ...prev, kafka_broker: e.target.value }))}
@@ -207,7 +207,8 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                     />
                   </div>
                   <p className="helper-text">
-                    Credentials come from the Kubernetes Secret defence-ops-kafka and are never shown here.
+                    Credentials come from the app&apos;s Helm values (kafka.username and kafka.password, or an
+                    existing Secret) and are never shown here.
                   </p>
                 </div>
               </div>

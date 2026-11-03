@@ -92,127 +92,180 @@ detailed version.
 
 ## What you need
 
-- **[HPE Private Cloud AI](https://www.hpe.com/us/en/hpe-private-cloud-ai.html)**,
-  which supplies the cluster, the model-serving endpoints and the ingress, with
-  `kubectl` and `helm` configured against it.
-- **A vision-language model** behind the cluster's LiteLLM proxy, and a LiteLLM key
-  for this app, stored as Secret `defence-ops-litellm` (key `api-key`) in the app's
-  namespace. The model must accept images, not just text.
-- **Capability flags on each model in LiteLLM.** Models don't report what they accept
-  through LiteLLM, and LiteLLM only knows that for models in its own catalogue. So set
-  `supports_vision`, `supports_video_input` and `supports_reasoning` in each model's
-  **Model Info** (LiteLLM UI: Models + Endpoints → model → Edit Settings). Unset flags
-  mean frames and no thinking mode. Through LiteLLM only vLLM-served models (MLIS
-  Nemotron VL) take a video clip; for Ollama models LiteLLM itself rejects video, so set
-  `supports_video_input: false` there.
-- *Optional:* a Kafka broker for live telemetry. Without one the dashboard runs on
-  generated alerts, which is enough to demo it.
+- **[HPE Private Cloud AI](https://www.hpe.com/us/en/hpe-private-cloud-ai.html)**
+  (PCAI), which supplies the cluster, the ingress with single sign-on and Keycloak.
+  The app is built and tested on PCAI.
+- **A [LiteLLM](https://docs.litellm.ai/) proxy** the cluster can reach, with at least
+  one **vision-language model** (it must accept images, not just text) and a virtual key
+  for this app. LiteLLM is not part of every PCAI installation; the chart expects it at
+  `http://litellm.litellm.svc.cluster.local:4000` unless you set `llm.baseUrl`.
+- *Optional:* a **Kafka broker** for the live alert ticker, such as the Kafka API of HPE
+  Data Fabric, with a topic and a user that may produce to and consume from it. Without
+  one the dashboard runs without the ticker.
+- A default StorageClass: the app keeps its settings on a 100 MiB volume.
+- Access to Docker Hub for the images (`erdincka/defence-ops-*`). In an air-gapped
+  cluster, mirror them and set the image repositories (see [Values](#values)).
 
-Private Cloud AI is what this demo is built and verified against. Nothing in the
-chart is hard-wired to it, so it will also install on a plain Kubernetes cluster
-with your own ingress and an OpenAI-compatible vision endpoint — that path just
-is not the supported one.
+## Set up LiteLLM
 
-## Deploy it
+1. **Add your vision model(s)** to LiteLLM, from any OpenAI-compatible server: HPE
+   Machine Learning Inference Software, vLLM, Ollama and so on.
+2. **Declare what each model accepts.** Models do not report their capabilities through
+   LiteLLM, and LiteLLM knows them only for models in its own catalogue. Add the flags to
+   each model's **Model Info** (LiteLLM admin UI: *Models + Endpoints* → the model →
+   *Edit Settings*), keeping the fields already there:
+   ```json
+   "supports_vision": true,
+   "supports_video_input": false,
+   "supports_reasoning": true
+   ```
+   | Flag | The app |
+   |---|---|
+   | `supports_vision` | sends still frames of the feeds (also when the flag is unset) |
+   | `supports_video_input` | sends one short Motion-JPEG clip of the feeds instead of frames |
+   | `supports_reasoning` | offers the **Thinking** switch for the model |
+
+   Video goes through LiteLLM only to vLLM-served models (tested with one); for
+   Ollama models LiteLLM rejects video before the model sees it, so leave
+   `supports_video_input` false there. A model that refuses a clip gets frames anyway.
+3. **Create a virtual key** for this app (*Virtual Keys*), limited to the models it
+   should use. The app lists exactly the models this key may use.
+
+## Install on Private Cloud AI
+
+1. Package the chart:
+   ```bash
+   helm package helm
+   ```
+2. In PCAI, under **Tools & Frameworks**, choose **Import Framework**. Give it the chart
+   (`defence-ops-<version>.tgz`), the logo (`defence-ops.png`) and a namespace, then set
+   the values:
+   - Keep the `ezua` block as it is: PCAI fills in `${DOMAIN_NAME}` and
+     `${OIDC_CLIENT_ID}`.
+   - `llm.apiKey`: the LiteLLM key (or `llm.existingSecret`, below). `llm.model`: the
+     model to start with.
+   - For live alerts: `kafka.broker`, `kafka.topic`, `kafka.username` and
+     `kafka.password` (or `kafka.existingSecret`), and `kafka.securityProtocol` and
+     `kafka.saslMechanism` if your broker differs from SASL_PLAINTEXT with PLAIN.
+3. Open the app from its tile, at `https://defence-ops.<your PCAI domain>`.
+
+To upgrade, import the new chart version the same way with the same values. The
+settings saved on System Config stay on the app's volume.
+
+### Credentials: values or an existing Secret
+
+Credentials given as values (`llm.apiKey`, `kafka.username`, `kafka.password`) go into
+Secrets the chart creates. They are also stored in the app's imported configuration and
+its Helm release, where cluster administrators can read them. To keep them out of
+there, create the Secrets yourself before importing, and name them in the values instead:
 
 ```bash
-kubectl create namespace defence-ops
-
-helm install defence-ops ./helm \
-  --namespace defence-ops \
-  --set ezua.virtualService.endpoint=defence-ops.<YOUR_DOMAIN>
-
-kubectl get pods -n defence-ops -w
+kubectl -n <namespace> create secret generic defence-ops-litellm --from-file=api-key=<file with the key>
+kubectl -n <namespace> create secret generic defence-ops-kafka \
+  --from-file=username=<file with the user> --from-file=password=<file with the password>
 ```
 
-`ezua.virtualService.endpoint` is the hostname the ingress will answer on; the chart
-uses it for both the route and the auth policy. The app is then at
-`https://defence-ops.<YOUR_DOMAIN>`.
+```yaml
+llm:
+  existingSecret:
+    name: defence-ops-litellm
+    key: api-key
+kafka:
+  existingSecret:
+    name: defence-ops-kafka   # keys username and password
+```
 
-On HPE Private Cloud AI you can instead use its **Import Framework** wizard, which
-takes a packaged chart and a logo: give it `defence-ops-<version>.tgz` and
-`defence-ops.png`, and a namespace.
+An existing Secret wins when both are set.
+
+### Other Kubernetes clusters
+
+The chart also installs with plain Helm on a cluster with Istio and an oauth2-proxy
+external authoriser like PCAI's. Set the values PCAI would fill in:
+
+```bash
+helm install defence-ops ./helm --namespace defence-ops --create-namespace \
+  --set ezua.domainName=<your domain> \
+  --set ezua.oidc.client_id=<OIDC client the sign-in uses> \
+  --set ezua.virtualService.endpoint=defence-ops.<your domain> \
+  --set llm.existingSecret.name=defence-ops-litellm
+```
+
+That path is not the supported one.
+
+### Values
+
+| Value | Default | Purpose |
+|---|---|---|
+| `ezua.domainName` | `${DOMAIN_NAME}` | Cluster domain; the Keycloak issuer is `https://keycloak.<domain>/realms/UA` |
+| `ezua.oidc.client_id` | `${OIDC_CLIENT_ID}` | Audience of the sign-in token that identifies administrators |
+| `ezua.virtualService.endpoint` | `defence-ops.${DOMAIN_NAME}` | Hostname of the app |
+| `llm.baseUrl` | `http://litellm.litellm.svc.cluster.local:4000` | LiteLLM proxy |
+| `llm.apiKey` / `llm.existingSecret` | none | The app's LiteLLM key |
+| `llm.model` | none | Model until an administrator picks one |
+| `llm.maxImages` | `5` | Frames per question for models without video |
+| `kafka.broker`, `kafka.topic` | none | Kafka target until an administrator sets one |
+| `kafka.securityProtocol` | `SASL_PLAINTEXT` | `PLAINTEXT`, `SSL`, `SASL_PLAINTEXT` or `SASL_SSL` |
+| `kafka.saslMechanism` | `PLAIN` | `PLAIN`, `SCRAM-SHA-256` or `SCRAM-SHA-512` |
+| `kafka.username`, `kafka.password` / `kafka.existingSecret` | none | Kafka credentials |
+| `settings.adminRole` | `admin` | Realm role allowed to change System Config |
+| `settings.oidcJwksUrl` | Keycloak's in-cluster Service | Where the signing keys are fetched |
+| `<service>.image.repository`, `<service>.image.tag` | `erdincka/defence-ops-<service>`, `global.image.tag` | Images (`appUi`, `kafkaService`, `llmService`, `videoService`) |
+| `networkPolicy.enabled` | `true` | Admit only the ingress gateway to the pod |
 
 ### First run
 
-As a PCAI administrator, open **System Config** in the navigation bar and set:
-
-| Setting | Value |
-|---|---|
-| Model | A **vision** model from the list LiteLLM offers this app's key |
-| Kafka *(optional)* | Broker (`host:port`) and topic |
-
-The Kafka credentials are Secret `defence-ops-kafka` (keys `username` and `password`)
-for a user limited to that stream. Everyone else sees System Config read-only.
+Open **System Config** in the navigation bar. It shows the model and Kafka target from
+the values until someone saves their own. Only PCAI administrators can change them:
+PCAI's sign-in passes the user's Keycloak ID token to the app, which checks it against
+Keycloak's keys and looks for the realm role `admin` in its `groups` claim (where PCAI
+puts realm roles) or in `realm_access.roles`. Everyone else sees System Config
+read-only, with the reason. If your tokens carry the role under another name, set
+`settings.adminRole`.
 
 Then pick a feed in any grid cell and press play. First load of each video is slow
 while it is fetched and cached; after that it is instant.
 
-- The **eye** icon asks what objects are in the scene; the **shield** icon scans for
-  threats. Both are one-click prompts.
-- The chat box takes anything else. Choose **Smart Context** to ask across every
-  playing feed plus recent telemetry, or scope it to one feed. **Thinking** mode
-  shows the model's reasoning before its answer.
+- The **shield** icon asks for a threat assessment of that feed; the **eye** icon for a
+  SALUTE report of what it shows.
+- The chat box takes anything else, typed or picked from the sample questions above it.
+  Choose **Smart Context** to ask across every playing feed plus recent alerts, or scope
+  it to one feed. **Thinking** mode shows the model's reasoning before its answer.
 
 [USAGE.md](./USAGE.md) is the full walkthrough; [EXAMPLES.md](./EXAMPLES.md) has
 questions that demo well.
 
 ## Development
 
-The Tiltfile targets the lonpcai cluster:
+The Tiltfile runs a live-reload copy on a PCAI cluster. Copy `tilt_config.example.json`
+to `tilt_config.json` (git-ignored) and set your kube context, a registry the cluster
+can pull from, the dev hostname, and any values such as the Secrets to use, then:
 
 ```bash
-KUBECONFIG=~/.kube/lon-master.yaml tilt up --context lonpcai
+tilt up --context <your kube context>
 ```
 
-Tilt builds the four images, pushes them to Harbor (`registry.nxsg.co.uk/dev`) and runs
-the pod in namespace `dev` at `https://defence-ops-dev.demo.lon-pcai.twlon.com`, with
-live reload and without SSO. Stop it with `tilt down --context lonpcai`. The Tiltfile
-refuses to deploy into `defence-ops`: a Tilt run there on 2026-05-29 took over the
-Import Framework release's Services and, after the release's next upgrade, left the app
-with no endpoints from 24 October to 2 November 2026.
+Tilt builds the four images, pushes them to that registry and runs the pod in the `dev`
+namespace at the dev hostname, with live reload and without SSO. Stop it with
+`tilt down --context <your kube context>`. Never point it at the namespace of an imported
+framework: Tilt takes over the release's objects there, and the app breaks at its next
+upgrade. The Tiltfile refuses PCAI's own namespaces and `defence-ops`.
 
-To publish images, sign in to Docker Hub as `erdincka` and pass the version. The script
-pushes only that tag; `latest` stays on the 1.0.x multi-pod images.
+To publish images, sign in to your registry and pass the version; `IMAGE_PREFIX` is the
+registry and account (default `erdincka` on Docker Hub). The script pushes only that tag.
 
 ```bash
-docker login -u erdincka
-./scripts/publish_images.sh 1.2.1
+IMAGE_PREFIX=registry.example.com/team ./scripts/publish_images.sh 1.3.0
 ```
 
-Then set `global.image.tag` in `helm/values.yaml`.
+Then set `global.image.tag` (and the image repositories, for another prefix) in
+`helm/values.yaml`.
 
 Each Python service is a uv project (`pyproject.toml`, `uv.lock`) with its own tests;
-run them in a container, never on the workstation, for example:
+run them in a container, for example:
 
 ```bash
 docker run --rm -v "$PWD":/work -w /work/llm-service python:3.12-slim sh -c 'pip install -q uv==0.13.6 && UV_PROJECT_ENVIRONMENT=/tmp/venv uv run --frozen pytest -q'
 ```
-
-### Releasing on lonpcai
-
-The Import Framework app is EzAppConfig `defence-ops-0.0.1-1774573363791`; its job runs
-`helm upgrade` from the platform chartmuseum with the record's `chartVersion` and
-`values`. The Secrets `defence-ops-litellm` and `defence-ops-kafka` must exist in the
-namespace first; the 1.2.0 rollout steps are in `~/Applications/lonpcai/defence-ops/README.md`.
-
-1. Publish the images with the release tag (above).
-2. Package the chart: `helm package helm -d dist`.
-3. Upload it to the chartmuseum (a protected namespace, so the cluster owner does this):
-   ```bash
-   kubectl --context lonpcai create --raw /api/v1/namespaces/ez-chartmuseum-ns/services/chartmuseum:8080/proxy/api/charts -f dist/defence-ops-0.2.1.tgz
-   ```
-4. Point the record at the new version. The values set the endpoint and the Keycloak
-   issuer, so that `${DOMAIN_NAME}` is substituted in both:
-   ```bash
-   kubectl --context lonpcai patch ezappconfig defence-ops-0.0.1-1774573363791 --type merge \
-     -p '{"spec":{"chartVersion":"0.2.1","values":"ezua:\n  virtualService:\n    endpoint: \"defence-ops.${DOMAIN_NAME}\"\n    istioGateway: \"istio-system/ezaf-gateway\"\nsettings:\n  oidc:\n    issuer: \"https://keycloak.${DOMAIN_NAME}/realms/UA\"\n"}}'
-   ```
-5. Check: the record shows `ready` with health `ok`, and `deployment/defence-ops` in
-   `defence-ops` is 4/4 ready.
-
-**Roll back:** patch `chartVersion` back to the previous version, which stays in the
-chartmuseum.
 
 ## Provenance, and a note on the sample videos
 

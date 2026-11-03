@@ -1,9 +1,28 @@
-# Dev loop for defence-ops on lonpcai: builds the four images, pushes them to Harbor and live-syncs
-# source into the single pod. It deploys to `dev` under its own hostname, never into the
-# Import Framework app's namespace `defence-ops`, whose release it would take over.
-KUBE_CONTEXT = 'lonpcai'
-NAMESPACE = 'dev'
-ENDPOINT = 'defence-ops-dev.demo.lon-pcai.twlon.com'
+# Dev loop for defence-ops on a PCAI cluster: builds the four images, pushes them to a registry the
+# cluster can pull from and live-syncs source into the single pod. It deploys to a dev namespace
+# under its own hostname, never into the Import Framework app's namespace, whose release it would
+# take over.
+#
+# Settings come from tilt_config.json (git-ignored; copy tilt_config.example.json):
+#   context    kube context to deploy with (Tilt refuses any other)
+#   registry   image registry the cluster pulls from, e.g. registry.example.com/dev
+#   endpoint   hostname for the dev VirtualService, e.g. defence-ops-dev.<your PCAI domain>
+#   namespace  dev namespace (default dev)
+#   set        extra Helm values, e.g. ["llm.existingSecret.name=my-litellm-key"]
+config.define_string('context')
+config.define_string('registry')
+config.define_string('endpoint')
+config.define_string('namespace')
+config.define_string_list('set')
+cfg = config.parse()
+for key in ['context', 'registry', 'endpoint']:
+    if not cfg.get(key):
+        fail('set "%s" in tilt_config.json (see tilt_config.example.json)' % key)
+KUBE_CONTEXT = cfg['context']
+NAMESPACE = cfg.get('namespace', 'dev')
+ENDPOINT = cfg['endpoint']
+EXTRA_VALUES = cfg.get('set', [])
+# PCAI's own namespaces and the Import Framework app's namespace.
 PROTECTED = ['default', 'datafabric', 'defence-ops', 'istio-system', 'keycloak', 'kyverno', 'litellm',
              'metallb-system', 'mlflow', 'mlis', 'monitoring', 'nfs-csi', 'otel-collector',
              'superset', 'ui', 'welcome']
@@ -18,7 +37,7 @@ for prefix in PROTECTED_PREFIXES:
     if NAMESPACE.startswith(prefix):
         fail('refusing to deploy into protected namespace %s' % NAMESPACE)
 
-default_registry('registry.nxsg.co.uk/dev')
+default_registry(cfg['registry'])
 
 # Do NOT pass `only=` to docker_build: it strips source out of the images. The root .dockerignore
 # keeps the build context small instead.
@@ -37,7 +56,7 @@ docker_build(
     'erdincka/defence-ops-app-ui',
     context='.',
     dockerfile='app-ui/Dockerfile',
-    ignore=other_services('app-ui', ['common', 'assets', 'scripts', 'README.md', 'EXAMPLES.md', 'LICENSE', 'defence-ops.png', '.env.example']),
+    ignore=other_services('app-ui', ['common', 'assets', 'scripts', 'README.md', 'EXAMPLES.md', 'LICENSE', 'defence-ops.png', '.env.example', 'tilt_config*.json']),
     live_update=[
         fall_back_on(['./app-ui/package.json', './app-ui/package-lock.json']),
         sync('./app-ui/app', '/app/app'),
@@ -113,6 +132,6 @@ k8s_yaml(helm(
         # `next dev` compiles pages in the pod: it peaked at 3.4 GiB on 2026-11-02, against 257 MiB
         # for the built app.
         'appUi.resources.limits.memory=6Gi',
-    ]
+    ] + EXTRA_VALUES
 ))
 k8s_resource('defence-ops', links=[link('https://' + ENDPOINT, 'Ops Centre (dev)')])

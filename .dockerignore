@@ -21,3 +21,4 @@ defence-ops-ezapp.yaml
 **/.ruff_cache/
 **/.mypy_cache/
 **/tests/
+tilt_config*.json
