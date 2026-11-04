@@ -283,22 +283,27 @@ questions that demo well.
 
 ## Development
 
-The Tiltfile runs a live-reload copy on a PCAI cluster. Copy `tilt_config.example.json`
-to `tilt_config.json` (git-ignored) and set your kube context, a registry the cluster
-can pull from, the dev hostname, and any values such as the Secrets to use, then:
+Run a live-reload copy of the app on a PCAI cluster with [Tilt](https://tilt.dev), in namespace `dev` under its
+own dev hostname. It never touches the live app: the Tiltfile refuses PCAI's own namespaces and every namespace a
+PCAI app is installed in.
 
-```bash
-tilt up --context <your kube context>
-```
+1. Install Tilt, Docker, `kubectl` and `helm`; get a kubeconfig for the cluster; `docker login` to a registry the
+   cluster can pull from.
+2. Copy `tilt_config.example.json` to `tilt_config.json` (git-ignored) and set your kube context, that registry,
+   the dev hostname and the values in `set`: the Secrets holding your LLM key and Kafka credentials in `dev`, a
+   model, and the Kafka broker and topic.
+3. Run `tilt up --context <your kube context>` and open the link Tilt shows. Each image is built from its
+   Dockerfile's `dev` target (`next dev`, `uvicorn --reload`), and edits sync into the pod and reload. The dev-only
+   chart values (no SSO, System Config open, a writable filesystem) are in `dev-values.yaml`.
+4. Run `tilt down --context <your kube context>` when you stop. It frees the app's dev slot and deletes the dev
+   copy, its volume included.
 
-Tilt builds the four images, pushes them to that registry and runs the pod in the `dev`
-namespace at the dev hostname, with live reload and without SSO. Stop it with
-`tilt down --context <your kube context>`. Never point it at the namespace of an imported
-framework: Tilt takes over the release's objects there, and the app breaks at its next
-upgrade. The Tiltfile refuses PCAI's own namespaces and `defence-ops`.
+Only one developer runs the dev copy at a time, and Tilt tells you who holds it. `"force": true` in
+`tilt_config.json` takes it over; agree that with them first.
 
 To publish images, sign in to your registry and pass the version; `IMAGE_PREFIX` is the
-registry and account (default `erdincka` on Docker Hub). The script pushes only that tag.
+registry and account (default `erdincka` on Docker Hub). The script builds each Dockerfile's
+`prod` target and pushes only that tag.
 
 ```bash
 IMAGE_PREFIX=registry.example.com/team ./scripts/publish_images.sh 1.4.0

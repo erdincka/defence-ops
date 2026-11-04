@@ -28,7 +28,7 @@ for SERVICE in "${SERVICES[@]}"; do
     echo "📦 Building $IMAGE_NAME..."
     
     # Run docker build from the root context using specific Dockerfile
-    docker build --platform linux/amd64 -t "$IMAGE_NAME:$VERSION" -f "$SERVICE/Dockerfile" . --push
+    docker build --platform linux/amd64 --target prod -t "$IMAGE_NAME:$VERSION" -f "$SERVICE/Dockerfile" . --push
     
     if [ $? -ne 0 ]; then
         echo "❌ Build failed for $SERVICE"

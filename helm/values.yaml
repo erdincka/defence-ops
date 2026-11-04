@@ -16,8 +16,6 @@ ezua:
     enabled: true
 
 global:
-  # development runs Next.js and uvicorn with live reload; production runs the built app.
-  appEnv: production
   # Extra environment variables for every container, as a list of Kubernetes EnvVar objects.
   extraEnv: []
   image:

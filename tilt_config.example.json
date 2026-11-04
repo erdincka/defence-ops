@@ -1,13 +1,14 @@
 {
-  "context": "my-pcai-cluster",
-  "registry": "registry.example.com/dev",
-  "endpoint": "defence-ops-dev.pcai.example.com",
+  "context": "<your kube context>",
+  "registry": "<registry the cluster pulls from>/dev",
+  "endpoint": "defence-ops-dev.<your PCAI domain>",
   "namespace": "dev",
+  "platform": "linux/amd64",
   "set": [
-    "llm.existingSecret.name=defence-ops-litellm",
-    "kafka.existingSecret.name=defence-ops-kafka",
-    "llm.model=my-vision-model",
-    "kafka.broker=kafka.example.com:9092",
-    "kafka.topic=tactical-alerts"
+    "llm.existingSecret.name=<Secret with your LLM key in dev>",
+    "kafka.existingSecret.name=<Secret with your Kafka credentials in dev>",
+    "llm.model=<a vision model your key may use>",
+    "kafka.broker=<broker host:port>",
+    "kafka.topic=<alerts topic>"
   ]
 }

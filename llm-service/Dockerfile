@@ -1,4 +1,4 @@
-FROM --platform=linux/amd64 python:3.12-slim
+FROM --platform=linux/amd64 python:3.12-slim AS base
 COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /bin/uv
 
 RUN groupadd -g 10001 app && useradd -u 10001 -g app -M -d /app app
@@ -19,9 +19,10 @@ USER 10001
 
 EXPOSE 8000
 
-# Run dev if ENV=development, otherwise run production
-CMD if [ "$ENV" = "development" ]; then \
-      uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --reload; \
-    else \
-      uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}; \
-    fi
+# Tilt's dev loop: reloads on every synced change
+FROM base AS dev
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --reload
+
+# Production, the default target (last, so a plain docker build builds it)
+FROM base AS prod
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}

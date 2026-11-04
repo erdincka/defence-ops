@@ -66,8 +66,6 @@ ServiceAccount name
 Environment shared by every container. Call with (dict "root" $ "service" .Values.<service>).
 */}}
 {{- define "defence-ops.env" -}}
-- name: ENV
-  value: {{ .root.Values.global.appEnv | quote }}
 - name: PORT
   value: {{ .service.port | quote }}
 - name: CONFIG_PATH

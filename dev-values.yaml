@@ -1,0 +1,20 @@
+# Dev-only chart values for the Tilt dev loop (skill pcai-dev-loop); production never uses them. Personal values
+# (Secret names, model, Kafka target) go in tilt_config.json's "set".
+ezua:
+  # SSO's AuthorizationPolicy lives in istio-system, which a dev loop must not touch: no SSO in dev.
+  authorizationPolicy:
+    enabled: false
+settings:
+  # Without SSO there is no sign-in token to check, so System Config is open in dev.
+  auth: open
+securityContext:
+  # Tilt's live update writes source into the containers.
+  readOnlyRootFilesystem: false
+persistence:
+  # A claim of its own; `tilt down` deletes it with the rest of the dev copy.
+  claimName: defence-ops-data
+appUi:
+  resources:
+    limits:
+      # `next dev` compiles pages in the pod: it peaked at 3.4 GiB on 2026-11-02, against 257 MiB built.
+      memory: 6Gi
