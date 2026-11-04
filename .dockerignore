@@ -4,6 +4,8 @@
 .dockerignore
 .tiltignore
 Tiltfile
+dev-values.yaml
+CLAUDE.md
 helm/
 charts/
 dist/

@@ -1,20 +1,18 @@
+# Paths Tilt neither watches nor sends to the image build. The chart, Tiltfile and dev values stay watched (a change
+# redeploys); .dockerignore keeps them out of the images.
 .git
-.gitignore
-.dockerignore
-.tiltignore
-helm/
-charts/
-dist/
-*.tgz
-defence-ops-ezapp.yaml
-*.mp4
 **/node_modules/
 **/.next/
-**/__pycache__/
+**/dist/
 **/.venv/
-# Editor temp files and test caches: they are not in any sync() path, so Tilt would rebuild the pod.
+**/__pycache__/
+**/*.tgz
+# Recordings at the root; the demo videos in assets/videos/ are baked into video-service.
+*.mp4
+# Editor temp files and test caches: they match no sync() path, so Tilt would rebuild the image for them.
 **/*.tmp.*
-**/pytest-cache-files-*/
+**/*.swp
 **/.pytest_cache/
+**/pytest-cache-files-*/
 **/.ruff_cache/
 **/.mypy_cache/
